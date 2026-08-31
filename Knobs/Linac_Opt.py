@@ -142,6 +142,50 @@ RESTORE_PVS = [
                   f"QM{i}L:currentWrite" for i in range(1, 4)
               ]
 
+# Conservative ARD priors obtained from the BO2026 offline fit.  These are
+# deliberately not the sharper ternary-only estimates: a production BO run
+# needs a global prior that remains resolvable on the hardware grid.
+LINAC_LEARNED_LENGTH_SCALES = {
+    "RFGUN:PHASE_WRITE": 3.5,
+    SOLENOIDE_WRITE_PV: 12.5,
+    "CM0L:PHASEWRITE": 2.5,
+    **{f"CM{i}L:PHASEWRITE": value for i, value in enumerate((4.6, 4.7, 4.1, 4.0, 4.6, 4.4, 4.5, 4.5), start=1)},
+    "EVE_LINAC:OUT0:SETDATA": 22.4,
+    **{f"QA{i}L:CURRENTWRITE": value for i, value in enumerate((0.50, 0.53, 0.44, 0.61, 0.82), start=1)},
+    **{f"QM{i}L:CURRENTWRITE": value for i, value in enumerate((1.10, 1.19, 1.08), start=1)},
+}
+LINAC_HYPERPARAMETER_MODES = ("legacy_fixed", "learned_fixed")
+LINAC_LEARNED_PRESET_VERSION = "BO2026-conservative-v1"
+
+
+def _linac_axis_key(axis_name: str) -> str:
+    """Return a stable lookup key for a PV or a human-readable LINAC axis."""
+    text = str(axis_name or "").strip().upper().replace(" ", "")
+    return text.replace("PHASEREAD", "PHASEWRITE").replace("CURRENTREAD", "CURRENTWRITE")
+
+
+def resolve_linac_length_scale(
+    axis_name: str,
+    axis_range: float,
+    axis_step: float,
+    *,
+    mode: str = "legacy_fixed",
+    n_step_floor: float = 2.0,
+) -> Tuple[float, str]:
+    """Resolve a safe fixed GP length scale and record its source.
+
+    Unknown/developer axes intentionally retain the historical range/3 rule.
+    """
+    safe_range = max(abs(float(axis_range)), abs(float(axis_step)), 1e-6)
+    legacy = max(safe_range / 3.0, 1e-6)
+    if str(mode).strip().lower() != "learned_fixed":
+        return legacy, "legacy_range_over_3"
+    learned = LINAC_LEARNED_LENGTH_SCALES.get(_linac_axis_key(axis_name))
+    if learned is None:
+        return legacy, "legacy_fallback_unknown_axis"
+    floor = max(float(n_step_floor) * abs(float(axis_step)), 1e-6)
+    return max(float(learned), floor), LINAC_LEARNED_PRESET_VERSION
+
 
 def _format_machine_value(value: float, unit: str) -> str:
     if not np.isfinite(float(value)):
@@ -1279,12 +1323,26 @@ class OptimizationWorker(QThread):
         uncertainty_rel_tol = float(self.config.get("gbo_uncertainty_rel_tol", 0.05))
         uncertainty_abs_tol_cfg = self.config.get("gbo_uncertainty_abs_tol", None)
 
-        # Length scales: heuristic proportional to range per dim
+        # Fixed ARD priors.  legacy_fixed preserves the previous range/3
+        # behavior exactly; learned_fixed uses the BO2026 conservative preset
+        # and never drops below the configured number of hardware steps.
         ranges = np.maximum(hi - lo, steps)
-        ls = np.maximum(ranges / 3.0, 1e-6)
+        hp_mode = str(self.config.get("bo_hyperparameter_mode", "legacy_fixed")).lower()
+        n_step_floor = float(self.config.get("bo_length_scale_n_step_floor", 2.0))
+        resolved_ls = [
+            resolve_linac_length_scale(
+                pv,
+                axis_range=float(ranges[i]),
+                axis_step=float(steps[i]),
+                mode=hp_mode,
+                n_step_floor=n_step_floor,
+            )
+            for i, pv in enumerate(pvs)
+        ]
+        ls = np.asarray([item[0] for item in resolved_ls], dtype=float)
         # Allow override
         if "gbo_length_scale_factor" in self.config:
-            ls = np.maximum(ls * float(self.config["gbo_length_scale_factor"]), 1e-6)
+            ls = np.maximum(ls * float(self.config["gbo_length_scale_factor"]), n_step_floor * steps)
 
         rng = np.random.default_rng()
         grid_max_idx = np.maximum(0, np.round((hi - lo) / steps).astype(int))
@@ -1354,6 +1412,12 @@ class OptimizationWorker(QThread):
         self.log_signal.emit(
             f"[GROUP_BO] {group_name}: lattice_points={total_lattice_points}, "
             f"candidate_mode={'full_lattice' if total_lattice_points <= full_lattice_limit else 'sampled_lattice'}"
+        )
+        self.log_signal.emit(
+            f"[GROUP_BO][GP] mode={hp_mode}, preset={LINAC_LEARNED_PRESET_VERSION if hp_mode == 'learned_fixed' else 'legacy'}, "
+            f"length_scales={{" + ", ".join(
+                f"{pv}:{ls_i:.6g} ({source})" for pv, ls_i, (_, source) in zip(pvs, ls, resolved_ls)
+            ) + "} | signal_sd=%.6g noise_sd=%.6g" % (sigma_f, sigma_n)
         )
         if resume_done_row is not None:
             vec = resume_done_row.get("vector", {})
@@ -1603,12 +1667,31 @@ class OptimizationWorker(QThread):
         refine_enabled = bool(self.config.get("bo_refine", True))
         refine_factor = float(self.config.get("bo_refine_factor", 5.0))  # step -> step/refine_factor
 
-        # GP hyperparams (heuristic)
+        # GP hyperparameters.  The historical default was range/3; retain it
+        # under legacy_fixed so loading an older config is behavior-compatible.
         x_range = float(candidates[-1] - candidates[0]) if len(candidates) >= 2 else 1.0
-        length_scale = float(self.config.get("bo_length_scale", max(x_range / 3.0, 1e-6)))
+        axis_step = float(np.median(np.diff(candidates))) if len(candidates) >= 2 else x_range
+        hp_mode = str(self.config.get("bo_hyperparameter_mode", "legacy_fixed")).lower()
+        n_step_floor = float(self.config.get("bo_length_scale_n_step_floor", 2.0))
+        length_scale, length_source = resolve_linac_length_scale(
+            pv_name,
+            axis_range=x_range,
+            axis_step=axis_step,
+            mode=hp_mode,
+            n_step_floor=n_step_floor,
+        )
+        # Preserve an explicit old-style override, which is useful for an
+        # offline comparison and was supported before BO2026.
+        if "bo_length_scale" in self.config:
+            length_scale = max(float(self.config["bo_length_scale"]), n_step_floor * abs(axis_step))
+            length_source = "explicit_config_override"
         sigma_f = float(self.config.get("bo_sigma_f", 1.0))
         sigma_n = float(self.config.get("bo_sigma_n", 1e-2))
         xi = float(self.config.get("bo_xi", 0.0))
+        self.log_signal.emit(
+            f"[BO1D][GP] axis={pv_name}, mode={hp_mode}, length_scale={length_scale:.6g}, "
+            f"source={length_source}, signal_sd={sigma_f:.6g}, noise_sd={sigma_n:.6g}"
+        )
 
         X, Y, R = [], [], []  # store evaluated (x, score, EvalResult)
 
@@ -3202,6 +3285,17 @@ class MainWindow(QMainWindow):
         self.sp_settle_sec.setValue(SETTLE_SEC_DEFAULT)
         lay_adv.addWidget(self.sp_settle_sec)
         lay_adv.addWidget(QLabel("s"))
+        lay_adv.addSpacing(18)
+        lay_adv.addWidget(QLabel("BO GP preset"))
+        self.bo_hyperparameter_mode_box = QComboBox()
+        self.bo_hyperparameter_mode_box.addItems(list(LINAC_HYPERPARAMETER_MODES))
+        # New runs use the conservative offline-derived prior.  Config files
+        # created before this field existed are loaded as legacy_fixed below.
+        self.bo_hyperparameter_mode_box.setCurrentText("learned_fixed")
+        self.bo_hyperparameter_mode_box.setToolTip(
+            "legacy_fixed: historical range/3. learned_fixed: BO2026 conservative ARD priors."
+        )
+        lay_adv.addWidget(self.bo_hyperparameter_mode_box)
         lay_adv.addStretch(1)
 
         path_group = QGroupBox("Data Save Location")
@@ -4230,6 +4324,12 @@ class MainWindow(QMainWindow):
         self.chk_qa.setChecked(bool(payload.get("qa", self.chk_qa.isChecked())))
         self.chk_qm.setChecked(bool(payload.get("qm", self.chk_qm.isChecked())))
         self.sp_settle_sec.setValue(float(payload.get("settle_sec", self.sp_settle_sec.value())))
+        # Old saved configurations predate this setting; they must retain the
+        # historical effective GP behavior rather than inheriting the GUI's
+        # learned-preset default.
+        hp_mode = str(payload.get("bo_hyperparameter_mode", "legacy_fixed"))
+        if self.bo_hyperparameter_mode_box.findText(hp_mode) >= 0:
+            self.bo_hyperparameter_mode_box.setCurrentText(hp_mode)
         self.sp_score_w_ttot.setValue(float(payload.get("score_w_ttot", self.sp_score_w_ttot.value())))
         self.sp_score_w_downstream.setValue(
             float(payload.get("score_w_downstream", self.sp_score_w_downstream.value())))
@@ -4489,6 +4589,8 @@ class MainWindow(QMainWindow):
             "score_w_downstream": float(self.dev_sp_score_w_downstream.value()),
             "downstream_ict": str(self.dev_downstream_ict_box.currentText()),
             "settle_sec": float(self.sp_settle_sec.value()),
+            "bo_hyperparameter_mode": str(self.bo_hyperparameter_mode_box.currentText()),
+            "bo_length_scale_n_step_floor": 2.0,
             "restore_pvs": restore_pvs,
             "reuse_initial_eval": True,
             "resume_csv_path": str(Path(resume_path_text).expanduser().resolve()) if resume_path_text else "",
@@ -4547,6 +4649,8 @@ class MainWindow(QMainWindow):
         config = {
             "mode": mode,
             "settle_sec": float(self.sp_settle_sec.value()),
+            "bo_hyperparameter_mode": str(self.bo_hyperparameter_mode_box.currentText()),
+            "bo_length_scale_n_step_floor": 2.0,
             "score_w_ttot": float(getattr(self, "sp_score_w_ttot").value()),
             "score_w_downstream": float(getattr(self, "sp_score_w_downstream").value()),
             "downstream_ict": str(getattr(self, "cb_downstream_ict").currentText()),

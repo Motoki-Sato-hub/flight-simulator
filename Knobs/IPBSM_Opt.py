@@ -378,6 +378,14 @@ class OptimizerConfig:
     gp_kernel: str = "rbf"
     gp_length_scale: float = 1.2
     gp_ard_length_scales: Optional[Dict[str, float]] = None
+    # legacy_fixed retains the former init_sigma-as-ARD behavior.  The learned
+    # mode applies conservative BO2026 priors and leaves non-analysed axes at
+    # their configured init_sigma values.
+    hyperparameter_mode: str = "legacy_fixed"
+    zscan_kernel: str = "rbf"
+    zscan_initial_points: int = 3
+    length_scale_n_step_floor: float = 2.0
+    hyperparameter_preset_version: str = "BO2026-conservative-v1"
     gp_signal_var: float = 0.15
     gp_noise_var: float = 1e-4
     ucb_beta: float = 2.0
@@ -478,7 +486,11 @@ class Optimizer:
             ay_vals = [ay_center, ay_center + ay_sigma, ay_center - ay_sigma]
             for z_idx in z_idxs:
                 z_center = 0.5 * (float(lo[z_idx]) + float(hi[z_idx]))
-                z_vals = [z_center, float(hi[z_idx]), float(lo[z_idx])]
+                if int(getattr(self.cfg, "zscan_initial_points", 3)) >= 5:
+                    z_vals = [float(lo[z_idx]), 0.5 * (float(lo[z_idx]) + z_center), z_center,
+                              0.5 * (z_center + float(hi[z_idx])), float(hi[z_idx])]
+                else:
+                    z_vals = [z_center, float(hi[z_idx]), float(lo[z_idx])]
                 for z_val in z_vals:
                     for ay_val in ay_vals:
                         x_ayz = x0.copy()
@@ -492,6 +504,13 @@ class Optimizer:
                 x_center = x0.copy()
                 x_center[i] = 0.5 * (float(lo[i]) + float(hi[i]))
                 _add_point(x_center)
+                if int(getattr(self.cfg, "zscan_initial_points", 3)) >= 5:
+                    for z_value in (float(lo[i]), 0.5 * (float(lo[i]) + x_center[i]),
+                                    0.5 * (x_center[i] + float(hi[i])), float(hi[i])):
+                        x_z = x_center.copy()
+                        x_z[i] = z_value
+                        _add_point(x_z)
+                    continue
                 xp = x_center.copy(); xp[i] = float(hi[i])
                 xm = x_center.copy(); xm[i] = float(lo[i])
             else:
@@ -567,7 +586,10 @@ class Optimizer:
     def _save_config(self):
         cfg_path = self.out_dir / "config.json"
         with open(cfg_path, "w", encoding="utf-8") as f:
-            json.dump(asdict(self.cfg), f, indent=2, ensure_ascii=False)
+            payload = asdict(self.cfg)
+            payload["resolved_gp_hyperparameters"] = self._gp_metadata()
+            payload["signal_noise_interpretation"] = "variance"
+            json.dump(payload, f, indent=2, ensure_ascii=False)
 
     def _save_machine_origin(self):
         baseline_state = None
@@ -1547,7 +1569,31 @@ class Optimizer:
 
     def _candidate_points(self, n: int) -> np.ndarray:
         lo, hi = self._bounds_arrays()
-        return lo + (hi - lo) * self.rng.random((n, lo.shape[0]))
+        d = lo.shape[0]
+        n = max(1, int(n))
+        z_axes = self._zscan_axis_indices()
+        if not z_axes:
+            return lo + (hi - lo) * self.rng.random((n, d))
+
+        # The Z actuator is discrete on the machine.  Enumerate its lattice
+        # instead of optimizing an unobservable continuous coordinate.
+        z_grids = []
+        for axis in z_axes:
+            step = self._step_for_param(self.cfg.params[axis])
+            count = int(round((hi[axis] - lo[axis]) / step))
+            z_grids.append(np.clip(lo[axis] + np.arange(count + 1, dtype=float) * step, lo[axis], hi[axis]))
+        if d == len(z_axes):
+            mesh = np.meshgrid(*z_grids, indexing="ij")
+            cand = np.column_stack([m.reshape(-1) for m in mesh])
+        else:
+            cand = lo + (hi - lo) * self.rng.random((max(n, max(len(g) for g in z_grids)), d))
+            for axis, grid in zip(z_axes, z_grids):
+                cand[:, axis] = grid[np.arange(cand.shape[0]) % grid.size]
+        cand = np.vstack([self._quantize_x_vec(row) for row in cand])
+        cand = np.unique(np.round(cand, decimals=12), axis=0)
+        if len(self.X):
+            cand = np.asarray([row for row in cand if not self._is_duplicate_quantized_point(row)], dtype=float)
+        return cand.reshape((-1, d)) if cand.size else np.empty((0, d), dtype=float)
 
     def _candidate_points_in_box(self, center: np.ndarray, radius: np.ndarray, n: int) -> np.ndarray:
         lo, hi = self._bounds_arrays()
@@ -1555,9 +1601,28 @@ class Optimizer:
         radius = np.asarray(radius, float).reshape(-1)
         box_lo = np.maximum(lo, center - radius)
         box_hi = np.minimum(hi, center + radius)
-        return box_lo.reshape(1, -1) + (box_hi - box_lo).reshape(1, -1) * self.rng.random((n, lo.shape[0]))
+        cand = box_lo.reshape(1, -1) + (box_hi - box_lo).reshape(1, -1) * self.rng.random((n, lo.shape[0]))
+        return np.vstack([self._quantize_x_vec(row) for row in cand])
 
     def _gp_length_scales(self) -> np.ndarray:
+        mode = str(getattr(self.cfg, "hyperparameter_mode", "legacy_fixed")).strip().lower()
+        if mode == "learned_fixed":
+            # Z-only and Ay+Z fits had different response widths in the
+            # BO2026 audit.  Preserve user-defined values for all other axes.
+            z_axes = set(self._zscan_axis_indices())
+            is_z_only = len(self.cfg.params) == 1 and bool(z_axes)
+            coupled_ay_z = bool(z_axes) and any(str(p) == "Ay" for p in self.cfg.params)
+            vals = []
+            for index, param in enumerate(self.cfg.params):
+                if index in z_axes:
+                    value = 0.002 if is_z_only else (0.0025 if coupled_ay_z else 0.002)
+                elif coupled_ay_z and str(param) == "Ay":
+                    value = 0.08
+                else:
+                    value = float(self.cfg.init_sigma.get(param, self.cfg.gp_length_scale))
+                floor = float(getattr(self.cfg, "length_scale_n_step_floor", 2.0)) * self._step_for_param(param)
+                vals.append(max(float(value), floor, 1e-6))
+            return np.asarray(vals, float)
         cfg_ls = getattr(self.cfg, "gp_ard_length_scales", None)
         if isinstance(cfg_ls, dict) and cfg_ls:
             vals = [float(cfg_ls.get(p, self.cfg.init_sigma.get(p, self.cfg.gp_length_scale))) for p in self.cfg.params]
@@ -1570,6 +1635,24 @@ class Optimizer:
                 return np.maximum(arr.astype(float), 1e-6)
         vals = [float(self.cfg.init_sigma.get(p, self.cfg.gp_length_scale)) for p in self.cfg.params]
         return np.maximum(np.asarray(vals, float), 1e-6)
+
+    def _gp_zscan_kernel(self) -> str:
+        """Resolve the Z kernel separately and keep old configs on RBF."""
+        kernel = str(getattr(self.cfg, "zscan_kernel", "rbf") or "rbf").lower()
+        return kernel if kernel in {"rbf", "matern32", "matern52"} else "rbf"
+
+    def _gp_metadata(self) -> Dict[str, Any]:
+        return {
+            "mode": str(getattr(self.cfg, "hyperparameter_mode", "legacy_fixed")),
+            "preset_version": str(getattr(self.cfg, "hyperparameter_preset_version", "legacy")),
+            "kernel": str(self.cfg.gp_kernel),
+            "zscan_kernel": self._gp_zscan_kernel(),
+            "length_scales": {
+                name: float(value) for name, value in zip(self.cfg.params, self._gp_length_scales())
+            },
+            "signal_variance": float(self.cfg.gp_signal_var),
+            "noise_variance": float(self.cfg.gp_noise_var),
+        }
 
     def _fit_and_bootstrap(self) -> Dict:
         mode = "diag" if self.cfg.mode_name == "linear" else "full"
@@ -1791,9 +1874,9 @@ class Optimizer:
 
         X1 = np.asarray(x_hist, float).reshape(-1, 1)
         y1 = np.asarray(y_hist, float)
-        axis_ls = max(1e-6, float(self.cfg.init_sigma.get(axis_name, self._step_for_param(axis_name))))
+        axis_ls = max(1e-6, float(self._gp_length_scales()[axis]))
         gp = SimpleGP(GPParams(
-            kernel="rbf",
+            kernel=self._gp_zscan_kernel(),
             length_scale=np.array([axis_ls], dtype=float),
             signal_var=self.cfg.gp_signal_var,
             noise_var=self.cfg.gp_noise_var,
@@ -1809,16 +1892,14 @@ class Optimizer:
             )
             return x_fallback, f"bo1d_fallback_{gf_tag}"
 
-        n_cand = max(200, min(int(self.cfg.n_candidates), 4000))
-        cand_rand = self.rng.uniform(low=lo_axis, high=hi_axis, size=n_cand)
-        cand_all = np.concatenate([
-            cand_rand,
-            np.asarray(x_hist, float),
-            np.array([lo_axis, hi_axis, float(x_base[axis])], dtype=float),
-        ])
-        cand_q = np.array([self._quantize_knob(float(v), axis_name) for v in cand_all], dtype=float)
-        cand_q = np.clip(cand_q, lo_axis, hi_axis)
-        cand = np.unique(cand_q)
+        # This is a real hardware lattice, not a continuous surrogate
+        # domain.  Enumerate it and remove already measured settings.
+        cand = self._bo1d_plot_grid(axis_name, lo_axis, hi_axis, max_points=10000)
+        observed = np.array(
+            [self._quantize_knob(float(v), axis_name) for v in x_hist], dtype=float
+        )
+        if observed.size:
+            cand = cand[np.array([not np.any(np.isclose(v, observed, atol=1e-12)) for v in cand])]
         if cand.size == 0:
             self._latest_bo1d_trace = None
             x_fallback, gf_tag = self._propose_next_GF(
@@ -1868,11 +1949,15 @@ class Optimizer:
             signal_var=self.cfg.gp_signal_var,
             noise_var=self.cfg.gp_noise_var,
             zscan_axes=self._zscan_axis_indices(),
-            zscan_kernel="rbf",
+            zscan_kernel=self._gp_zscan_kernel(),
         ))
         gp.fit(X, y)
 
         cand = self._candidate_points(self.cfg.n_candidates)
+        if cand.size == 0:
+            # All quantized candidates have been evaluated.  Return the best
+            # known point rather than issuing a duplicate machine command.
+            return self._quantize_x_vec(X[int(np.argmax(y))]), 0.0
         mu, std = gp.predict(cand)
 
         if self.cfg.acquisition.upper() == "EI":
@@ -1921,7 +2006,7 @@ class Optimizer:
             signal_var=self.cfg.gp_signal_var,
             noise_var=self.cfg.gp_noise_var,
             zscan_axes=self._zscan_axis_indices(),
-            zscan_kernel="rbf",
+            zscan_kernel=self._gp_zscan_kernel(),
         ))
         gp.fit(X, y)
 

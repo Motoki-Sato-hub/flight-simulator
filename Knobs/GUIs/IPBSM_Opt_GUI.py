@@ -638,6 +638,20 @@ class MainWindow(QMainWindow):
         self.kernel_box.addItems(["rbf", "matern52", "matern32"])
         self.kernel_box.setCurrentText("rbf")
 
+        self.hyperparameter_mode_box = QComboBox()
+        self.hyperparameter_mode_box.addItems(["learned_fixed", "legacy_fixed"])
+        self.hyperparameter_mode_box.setCurrentText("learned_fixed")
+        self.hyperparameter_mode_box.setToolTip(
+            "learned_fixed uses BO2026 conservative ARD priors; legacy_fixed preserves init_sigma ARD values."
+        )
+        self.zscan_kernel_box = QComboBox()
+        self.zscan_kernel_box.addItems(["rbf", "matern32", "matern52"])
+        self.zscan_kernel_box.setCurrentText("rbf")
+        self.zscan_initial_points_box = QSpinBox()
+        self.zscan_initial_points_box.setRange(3, 5)
+        self.zscan_initial_points_box.setSingleStep(2)
+        self.zscan_initial_points_box.setValue(5)
+
         self.bounds_sigma_mult = QDoubleSpinBox()
         self.bounds_sigma_mult.setRange(0.5, 10.0)
         self.bounds_sigma_mult.setDecimals(2)
@@ -742,6 +756,9 @@ class MainWindow(QMainWindow):
         form.addRow("Method", self.method_box)
         form.addRow("Acquisition", self.acq_box)
         form.addRow("GP kernel", self.kernel_box)
+        form.addRow("GP hyperparameter mode", self.hyperparameter_mode_box)
+        form.addRow("Z-scan kernel", self.zscan_kernel_box)
+        form.addRow("Z-scan initial points", self.zscan_initial_points_box)
         form.addRow("Bounds = +/- n sigma", self.bounds_sigma_mult)
         form.addRow("Knob step", self.knob_step)
         out_row = QWidget()
@@ -1473,6 +1490,11 @@ class MainWindow(QMainWindow):
             gp_kernel=self.kernel_box.currentText(),
             gp_length_scale=1.0,
             gp_ard_length_scales=sigma_map,
+            hyperparameter_mode=self.hyperparameter_mode_box.currentText(),
+            zscan_kernel=self.zscan_kernel_box.currentText(),
+            zscan_initial_points=int(self.zscan_initial_points_box.value()),
+            length_scale_n_step_floor=2.0,
+            hyperparameter_preset_version="BO2026-conservative-v1",
             gp_signal_var=float(self.gp_sig.value()),
             gp_noise_var=float(self.gp_noise.value()),
             ucb_beta=float(self.ucb_beta.value()),
@@ -1495,6 +1517,11 @@ class MainWindow(QMainWindow):
         self.method_box.setCurrentText(method_name)
         self.kernel_box.setCurrentText(cfg.get("gp_kernel", "rbf"))
         self.acq_box.setCurrentText(cfg.get("acquisition", "EI"))
+        # Pre-BO2026 config files do not have this key and must retain their
+        # previous init_sigma-derived ARD behavior.
+        self.hyperparameter_mode_box.setCurrentText(cfg.get("hyperparameter_mode", "legacy_fixed"))
+        self.zscan_kernel_box.setCurrentText(cfg.get("zscan_kernel", "rbf"))
+        self.zscan_initial_points_box.setValue(int(cfg.get("zscan_initial_points", 3)))
 
         init_sigma = cfg.get("init_sigma", {})
         param_origins = cfg.get("param_origins", {})
@@ -2351,6 +2378,11 @@ class MainWindow(QMainWindow):
             self._set_active_scan_knobs(list(cfg.params))
         self._append_log(
             f"Run started: method={cfg.method} acquisition={cfg.acquisition} kernel={cfg.gp_kernel} params={cfg.params}"
+        )
+        self._append_log(
+            f"GP: mode={cfg.hyperparameter_mode} preset={cfg.hyperparameter_preset_version} "
+            f"z_kernel={cfg.zscan_kernel} z_init={cfg.zscan_initial_points} "
+            f"signal/noise=variance ({cfg.gp_signal_var:.6g}/{cfg.gp_noise_var:.6g})"
         )
         self._append_log(
             f"origin={cfg.param_origins} sigma={cfg.init_sigma} bounds={cfg.bounds} n_init={cfg.n_init_random} max_steps={cfg.bo_max_steps}"
