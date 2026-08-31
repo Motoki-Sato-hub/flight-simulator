@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>1214</width>
-    <height>847</height>
+    <width>1512</width>
+    <height>782</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -31,11 +31,17 @@
      <number>16</number>
     </property>
     <item>
-     <layout class="QVBoxLayout" name="verticalLayout">
+     <layout class="QVBoxLayout" name="verticalLayout" stretch="1,0,0">
       <item>
-       <layout class="QHBoxLayout" name="horizontal_layout">
+       <layout class="QHBoxLayout" name="horizontal_layout" stretch="0,1">
         <item>
          <widget class="QGroupBox" name="devicesGroup">
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Fixed" vsizetype="Expanding">
+            <horstretch>0</horstretch>
+            <verstretch>0</verstretch>
+           </sizepolicy>
+          </property>
           <property name="styleSheet">
            <string notr="true">QGroupBox#devicesGroup {
     background-color: rgb(245, 245, 245);
@@ -53,7 +59,7 @@ QGroupBox#devicesGroup::title {
           <property name="title">
            <string>Devices</string>
           </property>
-          <layout class="QVBoxLayout" name="left_layout">
+          <layout class="QVBoxLayout" name="left_layout" stretch="1,1">
            <property name="spacing">
             <number>8</number>
            </property>
@@ -71,6 +77,12 @@ QGroupBox#devicesGroup::title {
            </property>
            <item>
             <widget class="QGroupBox" name="correctorsGroup">
+             <property name="sizePolicy">
+              <sizepolicy hsizetype="Preferred" vsizetype="Expanding">
+               <horstretch>0</horstretch>
+               <verstretch>0</verstretch>
+              </sizepolicy>
+             </property>
              <property name="styleSheet">
               <string notr="true">QGroupBox#correctorsGroup {
     background-color: rgb(245, 245, 245);
@@ -88,7 +100,7 @@ QGroupBox#correctorsGroup::title {
              <property name="title">
               <string>Correctors</string>
              </property>
-             <layout class="QVBoxLayout" name="correctors_group_vbox">
+             <layout class="QVBoxLayout" name="correctors_group_vbox" stretch="0,0,1,0">
               <property name="spacing">
                <number>6</number>
               </property>
@@ -105,9 +117,23 @@ QGroupBox#correctorsGroup::title {
                <number>8</number>
               </property>
               <item>
+               <widget class="QLabel" name="corrector_filter_label">
+                <property name="text">
+                 <string>Input selection pattern for correctors:</string>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <layout class="QHBoxLayout" name="corrector_filter_layout">
+                <item>
+                 <widget class="QLineEdit" name="pattern_corrs_input"/>
+                </item>
+               </layout>
+              </item>
+              <item>
                <widget class="QListWidget" name="correctors_list">
                 <property name="sizePolicy">
-                 <sizepolicy hsizetype="Fixed" vsizetype="Expanding">
+                 <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
                   <horstretch>0</horstretch>
                   <verstretch>0</verstretch>
                  </sizepolicy>
@@ -147,6 +173,12 @@ QGroupBox#correctorsGroup::title {
            </item>
            <item>
             <widget class="QGroupBox" name="bpmsGroup">
+             <property name="sizePolicy">
+              <sizepolicy hsizetype="Preferred" vsizetype="Expanding">
+               <horstretch>0</horstretch>
+               <verstretch>0</verstretch>
+              </sizepolicy>
+             </property>
              <property name="styleSheet">
               <string notr="true">QGroupBox#bpmsGroup {
     background-color: rgb(245, 245, 245);
@@ -164,7 +196,7 @@ QGroupBox#bpmsGroup::title {
              <property name="title">
               <string>BPMs</string>
              </property>
-             <layout class="QVBoxLayout" name="bpms_group_vbox">
+             <layout class="QVBoxLayout" name="bpms_group_vbox" stretch="1,0">
               <property name="spacing">
                <number>6</number>
               </property>
@@ -183,7 +215,7 @@ QGroupBox#bpmsGroup::title {
               <item>
                <widget class="QListWidget" name="bpms_list">
                 <property name="sizePolicy">
-                 <sizepolicy hsizetype="Fixed" vsizetype="Expanding">
+                 <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
                   <horstretch>0</horstretch>
                   <verstretch>0</verstretch>
                  </sizepolicy>
@@ -225,7 +257,7 @@ QGroupBox#bpmsGroup::title {
          </widget>
         </item>
         <item>
-         <layout class="QVBoxLayout" name="right_layout">
+         <layout class="QVBoxLayout" name="right_layout" stretch="0,0,1">
           <property name="spacing">
            <number>2</number>
           </property>
@@ -619,6 +651,9 @@ QGroupBox::title {
                    <property name="decimals">
                     <number>5</number>
                    </property>
+                   <property name="maximum">
+                    <double>10000.000000000000000</double>
+                   </property>
                    <property name="singleStep">
                     <double>0.100000000000000</double>
                    </property>
@@ -644,6 +679,9 @@ QGroupBox::title {
                    </property>
                    <property name="decimals">
                     <number>5</number>
+                   </property>
+                   <property name="maximum">
+                    <double>10000.000000000000000</double>
                    </property>
                    <property name="singleStep">
                     <double>0.100000000000000</double>

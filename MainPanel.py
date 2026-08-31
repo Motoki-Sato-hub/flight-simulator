@@ -23,10 +23,13 @@ class MainWindow(QMainWindow):
         uic.loadUi(ui_path, self)
         self.application_choice=None
         self.compute_matrix_button.clicked.connect(self.handle_compute_response_matrix_click)
+        self.compute_matrix_qm_button.clicked.connect(self.handle_compute_response_matrix_qm_click)
         self.bba_interface_button.clicked.connect(self.handle_bba_click)
+        self.bba_qm_interface_button.clicked.connect(self.handle_bba_qm_click)
         self.emittance_interface_button.clicked.connect(self.handle_emittance_click)
         self.knobs_interface_button.clicked.connect(self.handle_knobs_click)
         self.sysid_interface_button.clicked.connect(self.handle_sysid_click)
+        self.sysid_qm_interface_button.clicked.connect(self.handle_sysid_qm_click)
         # self.dispersion_interface_button.clicked.connect(self.handle_dispersion_click)
         # self.linac_interface_button.clicked.connect(self.handle_linac_click)
         self._procs=[]
@@ -51,8 +54,14 @@ class MainWindow(QMainWindow):
     def handle_sysid_click(self):
         self.handling("SysID_GUI.py")
 
+    def handle_sysid_qm_click(self):
+        self.handling("SysID_QM_GUI.py")
+
     def handle_bba_click(self):
         self.handling("BBA_GUI.py")
+
+    def handle_bba_qm_click(self):
+        self.handling("BBA_QM_GUI.py")
 
     def handle_emittance_click(self):
         self.handling("Emittance_Measurement_GUI.py")
@@ -62,6 +71,9 @@ class MainWindow(QMainWindow):
 
     def handle_compute_response_matrix_click(self):
         self.handling("ComputeResponseMatrix_GUI.py")
+
+    def handle_compute_response_matrix_qm_click(self):
+        self.handling("ComputeResponseMatrix_QM_GUI.py")
 
     # def handle_linac_click(self):
     #     self.handling("Knobs/Linac_Opt.py")

@@ -548,7 +548,7 @@ if __name__ == "__main__":
         sys.exit(0)
 
     time_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-    dir_name = f"~/flight-simulator-data/BBA_QM_Sequential_{interface.get_name()}_{time_str}"
+    dir_name = f"~/CERN-Flight_Simulator-Data/BBA_QM_Sequential_{interface.get_name()}{time_str}"
     dir_name = os.path.expanduser(os.path.expandvars(dir_name))
     os.makedirs(dir_name, exist_ok=True)
 

@@ -8,14 +8,42 @@ from Knobs.jitter_subtraction import apply_jitter_subtraction
 Mutual response matrix calculation algorithm.
 '''
 
+class AdaptiveResponseMatrix:
+    def __init__(self, R0, forgetting=0.995, rank=3, p0_scale=100.0):
+        self.R0 = np.array(R0, dtype=float)
+        self.delta = np.zeros_like(self.R0)
+        self.P = None
+        self.p0_scale = p0_scale
+        self.forgetting = forgetting
+        self.rank = rank
+
+    def update(self, u, dx):
+        u = np.asarray(u, dtype=float).ravel() # vector with corrector kicks
+        dx = np.asarray(dx, dtype=float).ravel() # change of orbits on BPMs [on x, on y]
+        if self.P is None:
+            self.P = self.p0_scale / max(u @ u, 1e-12) * np.eye(len(u)) # how much RLS knows the matrix, if its big, it moves the R faster
+            # self.R0 + self.delta is a currently used response matrix
+        residual = dx - (self.R0 + self.delta) @ u # what bpms saw - what new R predicted, the residual is used to correct delta
+        Pu = self.P @ u # which fragments are not yet fully explored
+        denom = self.forgetting + u @ Pu # normalizes the size of update
+        self.P = (self.P - np.outer(Pu, Pu) / denom) / self.forgetting
+        self.delta = self.delta + np.outer(residual, Pu) / denom # change in R calculated by RLS
+        U, S, Vt = np.linalg.svd(self.delta, full_matrices=False) # strongest known directions
+        r = min(self.rank, S.size) # 3 or biggest S
+        self.delta = (U[:, :r] * S[:r]) @ Vt[:r] # update calculated by RLS
+
+    @property
+    def R(self):
+        return self.R0 + self.delta
+
 class ResponseMatrix_DFS_WFS():
 
-    def _compute_response_matrix_from_directory(self, directory, correctors, bpms, triangular=False, actuator_mode = "correctors"):
+    def _compute_response_matrix_from_directory(self, directory, correctors, bpms, triangular=False, actuator_mode="correctors", rcond=1e-3):
         info=self._find_useful_files(directory)
         if not info["ok"]:
             raise RuntimeError(f"Could not find any valid DATA pairs in {directory}")
 
-        return self._compute_response_matrix(pairs=info["pairs"],correctors=correctors, bpms=bpms, triangular=triangular, actuator_mode = actuator_mode)
+        return self._compute_response_matrix(pairs=info["pairs"], correctors=correctors, bpms=bpms, triangular=triangular, actuator_mode=actuator_mode, rcond=rcond)
 
     def _find_useful_files(self, directory):
         datafiles=sorted(glob.glob(os.path.join(directory, 'DATA*.pkl')))
@@ -34,7 +62,7 @@ class ResponseMatrix_DFS_WFS():
 
         return {"ok":bool(pairs), "dir":directory, "pairs":pairs}
 
-    def _compute_response_matrix(self, pairs, correctors, bpms, triangular=False, actuator_mode = "correctors"):
+    def _compute_response_matrix(self, pairs, correctors, bpms, triangular=False, actuator_mode="correctors", rcond=1e-3):
         if not hasattr(self, 'sequence'):
             file = pairs[0][0]
             S = State(filename=file)
@@ -43,8 +71,12 @@ class ResponseMatrix_DFS_WFS():
         if actuator_mode == "quadrupole_movers":
             return self._compute_qm_response_matrix(pairs=pairs, qcorrs=correctors, bpms=bpms, triangular=triangular)
         else:
-            hcorrs = [string for string in correctors if self._is_h_corrector(string)]
-            vcorrs = [string for string in correctors if self._is_v_corrector(string)]
+            # hcorrs = [string for string in correctors if self._is_h_corrector(string)]
+            # vcorrs = [string for string in correctors if self._is_v_corrector(string)]
+            file = pairs[0][0]
+            S = State(filename=file)
+            hcorrs = [c for c in correctors if c in S.hcorrectors_names]
+            vcorrs = [c for c in correctors if c in S.vcorrectors_names]
 
         # Pick all correctors preceding the last bpm
         hcorrs = [corr for corr in hcorrs if self.sequence.index(corr) < self.sequence.index(bpms[-1])]
@@ -61,7 +93,8 @@ class ResponseMatrix_DFS_WFS():
         By = np.empty((0, len(bpms)))
         Cx = np.empty((0, len(hcorrs)))
         Cy = np.empty((0, len(vcorrs)))
-        B_mask = np.full((1, len(bpms)), True, dtype=bool)
+        excited_hcorrs = set()
+        excited_vcorrs = set()
 
         for pair in pairs:
             if len(pair) == 3:
@@ -88,8 +121,6 @@ class ResponseMatrix_DFS_WFS():
             if all_not_finite:
                 print(f"Skipping all-NaN files: {os.path.basename(fp)} / {os.path.basename(fm)}")
                 continue
-
-            B_mask &= np.isfinite(Op['x']) & np.isfinite(Om['x']) & np.isfinite(Op['y']) & np.isfinite(Om['y'])
 
             if actuator_mode == "quadrupole_movers":
                 if str(tag).endswith("_x"):
@@ -128,6 +159,25 @@ class ResponseMatrix_DFS_WFS():
                 Cx_m = Sm.get_correctors(hcorrs)['bact']
                 Cy_m = Sm.get_correctors(vcorrs)['bact']
 
+                if tag in hcorrs:
+                    index = hcorrs.index(tag)
+                    requested = Sp.get_correctors([tag])['bdes'][0] - Sm.get_correctors([tag])['bdes'][0]
+                    measured = Cx_p[index] - Cx_m[index]
+                elif tag in vcorrs:
+                    index = vcorrs.index(tag)
+                    requested = Sp.get_correctors([tag])['bdes'][0] - Sm.get_correctors([tag])['bdes'][0]
+                    measured = Cy_p[index] - Cy_m[index]
+                else:
+                    requested = measured = np.nan
+
+                if np.isfinite(requested) and abs(requested) > 1e-12 and abs(measured) < 0.5 * abs(requested):
+                    print(f"Skipping unexecuted excitation {tag}: Δbdes={requested:.6g}, Δbact={measured:.6g}")
+                    continue
+                if tag in hcorrs:
+                    excited_hcorrs.add(tag)
+                elif tag in vcorrs:
+                    excited_vcorrs.add(tag)
+
 
             Bx = np.vstack((Bx, Op['x']))
             Bx = np.vstack((Bx, Om['x']))
@@ -138,18 +188,29 @@ class ResponseMatrix_DFS_WFS():
             Cy = np.vstack((Cy, Cy_p))
             Cy = np.vstack((Cy, Cy_m))
 
-        B_mask = B_mask.ravel()
+        Bx, By = Bx.astype(float), By.astype(float)
+        Cx, Cy = Cx.astype(float), Cy.astype(float)
 
-        # Compute the response matrices
-        ones_column_x = np.ones((Cx.shape[0], 1))
-        ones_column_y = np.ones((Cy.shape[0], 1))
+        # Drop unavailable correctors and incomplete shots before fitting.
+        # A corrector needs at least one successfully executed excitation;
+        # otherwise its constant readback is collinear with the offset term.
+        hcol_mask = np.array([corr in excited_hcorrs for corr in hcorrs]) & np.any(np.isfinite(Cx), axis=0)
+        vcol_mask = np.array([corr in excited_vcorrs for corr in vcorrs]) & np.any(np.isfinite(Cy), axis=0)
+        hcorrs = [corr for corr, keep in zip(hcorrs, hcol_mask) if keep]
+        vcorrs = [corr for corr, keep in zip(vcorrs, vcol_mask) if keep]
+        Cx, Cy = Cx[:, hcol_mask], Cy[:, vcol_mask]
 
-        # Add the column of ones to the matrix
-        Cx = np.hstack((Cx, ones_column_x)).astype(float)
-        Cy = np.hstack((Cy, ones_column_y)).astype(float)
+        row_mask = np.all(np.isfinite(Cx), axis=1) & np.all(np.isfinite(Cy), axis=1)
+        if not np.any(row_mask):
+            raise RuntimeError("No complete corrector readbacks available for response-matrix fitting")
+        Bx, By, Cx, Cy = Bx[row_mask], By[row_mask], Cx[row_mask], Cy[row_mask]
 
-        Bx = Bx.astype(float) # facet2 might give objects instead of floats64, like atf2
-        By = By.astype(float) # so we do a conversion of a whole array so that every element is a float and lstsq gets a normal, numeric array
+        B_mask = np.all(np.isfinite(Bx), axis=0) & np.all(np.isfinite(By), axis=0)
+        if not np.any(B_mask):
+            raise RuntimeError("No BPM has complete orbit data for response-matrix fitting")
+
+        Cx = np.hstack((Cx, np.ones((Cx.shape[0], 1))))
+        Cy = np.hstack((Cy, np.ones((Cy.shape[0], 1))))
 
         def lstsq(C, B):
             return np.transpose(np.linalg.lstsq(C, B[:, B_mask], rcond=None)[0])
@@ -213,7 +274,7 @@ class ResponseMatrix_DFS_WFS():
         info_dfs = self._data_dirs.get("dfs")
         info_wfs = self._data_dirs.get("wfs")
 
-        w1, w2, w3, rcond, iters, gain, beta = self._read_params()
+        w1, w2, w3, rcond, iters, gain, beta, transmission_threshold = self._read_params()
 
         if not (info_traj and info_traj["ok"]):
             raise RuntimeError("Please select a trajectory data directory")
@@ -262,7 +323,7 @@ class ResponseMatrix_DFS_WFS():
             bpms = list(selected_bpms)
 
 
-        w1, w2, w3, rcond, iters, gain,beta = self._read_params()
+        w1, w2, w3, rcond, iters, gain, beta, transmission_threshold = self._read_params()
         wgt_orb, wgt_dfs, wgt_wfs = w1, w2, w3
 
         #corrs, bpms = self._get_selection()

@@ -1,18 +1,23 @@
+import RF_Track as rft
 import sys
 import numpy as np
 import time, math
-from epics import get_pv
 from Interfaces.AbstractMachineInterface import AbstractMachineInterface
 # must run on SLAC controls network
 sys.path.append('/usr/local/facet/tools/python/F2_live_model/')
 sys.path.append('/usr/local/facet/tools/python/F2_pytools/')
 # sys.path.append('/home/fphysics/zack/workspace/F2_pytools/')
-from bmad import BmadLiveModel
-from F2_pytools.controls_jurisdiction import is_SLC
-from F2_pytools.f2bsaBuffer import make_bpm_buffer, get_bpmdata2
-from F2_pytools.mags import set_magnets
+try:
+    from bmad import BmadLiveModel
+    from epics import get_pv
+    from F2_pytools.controls_jurisdiction import is_SLC
+    from F2_pytools.f2bsaBuffer import make_bpm_buffer, get_bpmdata2
+    from F2_pytools.mags import set_magnets
+except ImportError:
+    bmad, epics, F2_pytools  = None, None, None
 from traceback import print_exception
-
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "FACET2"))
+import FACET2
 '''
 TO IMPLEMENT!!!
 
@@ -20,8 +25,7 @@ def get_screens(self):
     pass
 def set_quadrupoles(self):
     pass
-def vary_quadrupoles(self, names, corr_vals):
-    pass
+
 '''
 
 
@@ -44,6 +48,7 @@ class InterfaceFACET2_Linac(AbstractMachineInterface):
 
     def __init__(self, nsamples=10, livemodel=False, tao_initfile=None):
         self.log = print
+        self.lattice = FACET2.load_FACET()
         self.nsamples = nsamples
         if livemodel:
             self.f2m = BmadLiveModel(instanced=True, init_filename=tao_initfile)
@@ -90,6 +95,7 @@ class InterfaceFACET2_Linac(AbstractMachineInterface):
         # initialize bpm data buffer
         self.bpm_buffer = make_bpm_buffer(self.f2m, self.bpms, Npts=self.nsamples)
         print('InterfaceFACET2_Linac is ready')
+        self.machine_name = "FACET"
 
     def log_messages(self,console):
         self.log=console or print
@@ -105,6 +111,33 @@ class InterfaceFACET2_Linac(AbstractMachineInterface):
             return float(arr.flat[0])
         except Exception:
             return float(default)
+
+    def _give_elements_to_show_beamline(self, quad_selected):
+        start_quad_element_name = quad_selected
+        return start_quad_element_name
+
+    def _get_elements_positions_show_beamline(self, names=None):
+        if isinstance(names, str):
+            names = [names]
+        all_names = []
+        all_s = []
+        all_l = []
+        s_pos = 0.0
+        for element in self.lattice['*']:
+            element_name = element.get_name()
+            try:
+                element_length = float(element.get_length())
+            except Exception:
+                element_length = 0.0
+            if names is None or element_name in names:
+                all_names.append(element_name)
+                all_s.append(s_pos)
+                all_l.append(element_length)
+            s_pos += element_length
+        return {
+            "names": all_names,
+            "S": np.array(all_s, dtype=float),
+        }
 
     def _wait_for_magnet_readback(self, devname, target, tolerance=1e-4, timeout=1.0, poll_interval=0.05):
         bact_pv = get_pv(f'{devname}:BACT')
@@ -128,6 +161,9 @@ class InterfaceFACET2_Linac(AbstractMachineInterface):
         )
         return False
 
+    def _wait_for_pv_readback(self, pv, target, *, description, tolerance=1e-4, timeout=10.0):
+        return self._wait_for_readback(lambda: self._safe_float(pv.get(), default=np.nan), target, description=description, tolerance=tolerance, timeout=timeout)
+
     def _meascharge(self):
         qraw = []
         for j in range(self.nsamples):
@@ -145,32 +181,39 @@ class InterfaceFACET2_Linac(AbstractMachineInterface):
     def change_energy(self):
         """ set beam to -2MeV at DL10 and disable downstream feedbacks """
         print('Lowering beam energy starting from BC11')
-        get_pv(f'PHYS:SYS1:1:F2LFB_BC11E_VERN').put(-3.0)
-        get_pv(f'PHYS:SYS1:1:F2LFB_BC14E_VERN').put(-40.0)
-        get_pv(f'PHYS:SYS1:1:F2LFB_BC20E_VERN').put(-40.0)
+        targets = {
+            'bc11e_setpoint': -3.0,
+            'bc14e_setpoint': -40.0,
+            'bc20e_setpoint': -40.0,
+        }
+        for name, target in targets.items():
+            self.PVs[name].put(target)
+        for name, target in targets.items():
+            self._wait_for_pv_readback(self.PVs[name], target, description=name)
         # get_pv(f'PHYS:SYS1:1:F2LFB_BC11BL_TARGET').put(4400)
         # get_pv(f'PHYS:SYS1:1:F2LFB_BC14BL_TARGET').put(5000)
-        time.sleep(5.0)
         return -(3.0/335.0)
 
     def reset_energy(self):
         """ zero dl10 setpoint, re-enable feedbacks """
         print('Restoring beam energy at BC11, re-enabling feedbacks')
-        get_pv(f'PHYS:SYS1:1:F2LFB_BC11E_VERN').put(0)
-        get_pv(f'PHYS:SYS1:1:F2LFB_BC14E_VERN').put(0)
-        get_pv(f'PHYS:SYS1:1:F2LFB_BC20E_VERN').put(0)
+        for name in ('bc11e_setpoint', 'bc14e_setpoint', 'bc20e_setpoint'):
+            self.PVs[name].put(0.0)
+        for name in ('bc11e_setpoint', 'bc14e_setpoint', 'bc20e_setpoint'):
+            self._wait_for_pv_readback(self.PVs[name], 0.0, description=name)
         # get_pv(f'PHYS:SYS1:1:F2LFB_BC11BL_TARGET').put(5000)
         # get_pv(f'PHYS:SYS1:1:F2LFB_BC14BL_TARGET').put(8000)
-        time.sleep(5.0)
 
     def change_intensity(self):
         """ lowers bunch charge by ~200pC (2.5deg UV WP angle adjustment) """
         self.UVWP_init = self.PVs['UVWP_angle'].get()
         self.Q_init = self._meascharge()
-        self.PVs['UVWP_angle'].put(self.UVWP_init - 2.5)
-        time.sleep(2.0)
+        uvwp_target = self.UVWP_init - 2.5
+        self.PVs['UVWP_angle'].put(uvwp_target)
+        self._wait_for_pv_readback(self.PVs['UVWP_angle'], uvwp_target, description='UVWP_angle')
         self.Q_new = self._meascharge()
         self.PVs['Q_setpoint'].put(self.Q_new)
+        self._wait_for_pv_readback(self.PVs['Q_setpoint'], self.Q_new, description='Q_setpoint')
         print(f'Charge changed: {self.Q_init:.1f}  {self.Q_new:.1f} pC')
         return self
 
@@ -179,10 +222,49 @@ class InterfaceFACET2_Linac(AbstractMachineInterface):
         print(f'restoring charge setpoint to {self.init_charge_setpoint} pC')
         self.PVs['UVWP_angle'].put(self.UVWP_init)
         self.PVs['Q_setpoint'].put(self.init_charge_setpoint)
+        self._wait_for_pv_readback(self.PVs['UVWP_angle'], self.UVWP_init, description='UVWP_angle')
+        self._wait_for_pv_readback(self.PVs['Q_setpoint'], self.init_charge_setpoint, description='Q_setpoint')
         return self
 
+    def get_beam_settings(self):
+        energy_pvs = {
+            "dl10_feedback_vernier": "dl10e_setpoint",
+            "bc11_feedback_vernier": "bc11e_setpoint",
+            "bc14_feedback_vernier": "bc14e_setpoint",
+            "bc20_feedback_vernier": "bc20e_setpoint",
+        }
+        intensity_pvs = {
+            "uvwp_angle": "UVWP_angle",
+            "charge_setpoint": "Q_setpoint",
+        }
+        return {
+            "energy": {name: self._safe_float(self.PVs[pv].get()) for name, pv in energy_pvs.items()},
+            "intensity": {name: self._safe_float(self.PVs[pv].get()) for name, pv in intensity_pvs.items()},
+        }
+
+    def restore_beam_settings(self, settings):
+        settings = settings or {}
+        energy_pvs = {
+            "dl10_feedback_vernier": "dl10e_setpoint",
+            "bc11_feedback_vernier": "bc11e_setpoint",
+            "bc14_feedback_vernier": "bc14e_setpoint",
+            "bc20_feedback_vernier": "bc20e_setpoint",
+        }
+        intensity_pvs = {
+            "uvwp_angle": "UVWP_angle",
+            "charge_setpoint": "Q_setpoint",
+        }
+        for values, pv_names in ((settings.get("energy", {}), energy_pvs),
+                                 (settings.get("intensity", {}), intensity_pvs)):
+            for name, pv_name in pv_names.items():
+                value = self._safe_float(values.get(name))
+                if np.isfinite(value):
+                    self.PVs[pv_name].put(value)
+                    self._wait_for_pv_readback(self.PVs[pv_name], value, description=pv_name)
+        return True
+
     def get_icts(self, names=None):
-        return {"names": np.array([]), "charge": np.array([])}
+        return {"names": [], "charge": np.array([])}
 
     def get_sequence(self):
         return self.sequence
@@ -219,11 +301,11 @@ class InterfaceFACET2_Linac(AbstractMachineInterface):
         if isinstance(names, str):
             names = [names]
         if names is not None:
-            idx = np.array([i for i, s in enumerate(correctors["names"]) if s in names])
+            idx = [i for i, s in enumerate(correctors["names"]) if s in names]
             correctors = {
-                "names": np.array(correctors["names"])[idx],
-                "bdes": np.array(correctors["bdes"])[idx],
-                "bact": np.array(correctors["bact"])[idx],
+                "names": [correctors["names"][i] for i in idx],
+                "bdes": np.asarray(correctors["bdes"])[idx],
+                "bact": np.asarray(correctors["bact"])[idx],
             }
 
         return correctors
@@ -236,12 +318,12 @@ class InterfaceFACET2_Linac(AbstractMachineInterface):
                 if isinstance(names, str):
                     names = [names]
                 if names is not None:
-                    idx = np.array([i for i, s in enumerate(bpmdata["names"]) if s in names])
+                    idx = [i for i, s in enumerate(bpmdata["names"]) if s in names]
                     bpmdata = {
-                        "names": np.array(bpmdata["names"])[idx],
-                        "x": np.array(bpmdata["x"])[:, idx],
-                        "y": np.array(bpmdata["y"])[:, idx],
-                        "tmit": np.array(bpmdata["tmit"])[:, idx],
+                        "names": [bpmdata["names"][i] for i in idx],
+                        "x": np.asarray(bpmdata["x"])[:, idx],
+                        "y": np.asarray(bpmdata["y"])[:, idx],
+                        "tmit": np.asarray(bpmdata["tmit"])[:, idx],
                     }
                 return bpmdata
             except Exception as e:
@@ -254,12 +336,12 @@ class InterfaceFACET2_Linac(AbstractMachineInterface):
             if isinstance(names, str):
                 names = [names]
             if names is not None:
-                idx = np.array([i for i, s in enumerate(bpmdata["names"]) if s in names])
+                idx = [i for i, s in enumerate(bpmdata["names"]) if s in names]
                 bpmdata = {
-                    "names": np.array(bpmdata["names"])[idx],
-                    "x": np.array(bpmdata["x"])[:, idx],
-                    "y": np.array(bpmdata["y"])[:, idx],
-                    "tmit": np.array(bpmdata["tmit"])[:, idx],
+                    "names": [bpmdata["names"][i] for i in idx],
+                    "x": np.asarray(bpmdata["x"])[:, idx],
+                    "y": np.asarray(bpmdata["y"])[:, idx],
+                    "tmit": np.asarray(bpmdata["tmit"])[:, idx],
                 }
             return bpmdata
 

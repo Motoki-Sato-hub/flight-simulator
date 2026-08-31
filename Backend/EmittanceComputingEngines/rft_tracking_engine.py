@@ -1,4 +1,4 @@
-from Backend.Optimization_EM import Optimization_EM
+from Backend.EM_helpers.Optimization import Optimization
 from Backend.EmittanceComputingEngines.AbstractComputingEngine import AbstractComputingEngine
 
 
@@ -8,7 +8,7 @@ class RFTrackEngine(AbstractComputingEngine):
 
     def __init__(self, interface, **kwargs):
         super().__init__(interface)
-        self.optimizer = Optimization_EM(interface=interface, **kwargs)
+        self.optimizer = Optimization(interface=interface, **kwargs)
 
     def request_pause(self):
         self.optimizer.request_pause()

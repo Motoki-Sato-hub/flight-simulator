@@ -14,6 +14,9 @@ def get_quadrupoles(self):
     pass
 def set_quadrupoles(self):
     pass
+    
+BPMs at 0 dispersion region:
+ ML6T, ML5T, ML105T 
 '''
 
 LINAC_SEQUENCE = [
@@ -22,9 +25,17 @@ LINAC_SEQUENCE = [
     'ZH4L', 'ZV4L', 'ZH5L', 'ZV5L', 'ML4L', 'ZH6L', 'ZV6L', 'ML5L',
     'ZH7L', 'ZV7L', 'ML6L', 'ZH8L', 'ZV8L', 'ML7L', 'ZH9L', 'ML8L',
     'ZV9L', 'ML9L', 'ZH10L', 'ML10L', 'ZV10L', 'ML11L', 'ZH11L',
-    'ML12L', 'ZV11L', 'ML13L', 'ZH12L', 'ML14L', 'ZV12L', 'ML15L'
+    'ML12L', 'ZV11L', 'ML13L', 'ZH12L', 'ML14L', 'ZV12L', 'ML15L',
+    "ZX10T", "ZX11T", "ML1T", "ZH10T", "ZV11T", "MB1T", "ZX12T",
+    "ML2T", "ZY20T", "ZY21T", "ML101T", "ML102T", "ZY22T", "ZY23T", "ML103T",
+    "ZX30T", "ML3T", "ZX31T", "ZV30T", "ZH30T", "ML104T", "ZX32T", "ML4T",
+    "ML105T", "ZV40T", "ZH40T", "ML5T", "ML6T",
+    "ZX50T", "ML106T", "ZX51T", "ML7T", "ZX52T", "ZV50T", "ML8T", "ZH50T", "ZV51T", "ML9T",
+    "MB10T", "MB11T"
 ]
 
+# ATF2' BPMs Epics names
+# https://atf.kek.jp/atfbin/view/ATF/EPICS_DATABASE
 LINAC_MONITORS = [
     "MB5L", "MB6L", "MB7L", "MB8L", "MB9L", "MB10L", "MB11L", "ML1L",
     "ML2L", "ML3L", "ML4L", "ML5L", "ML6L", "ML7L", "ML8L", "ML9L",
@@ -89,6 +100,8 @@ class InterfaceATF2_Linac(AbstractMachineInterface):
         #     'ZX50T', 'ML106T', 'ZX50T', 'ML7T', 'ZX51T', 'ZV50T', 'ML8T', 'ZH50T',
         #     'ZV51T', 'ML9T', 'MB10T', 'MB11T'
         # ]'''
+        sequence=list(LINAC_SEQUENCE)
+        monitors=list(LINAC_MONITORS)
         # ATF2' BPMs Epics names
         # https://atf.kek.jp/atfbin/view/ATF/EPICS_DATABASE
         # monitors = [
@@ -133,7 +146,9 @@ class InterfaceATF2_Linac(AbstractMachineInterface):
             'ext:EXTcharge', 'linacbt:BTEcharge', 'BIM:DR:nparticles', 'BIM:IP:nparticles'
         ]
         self.phase_kl1 = PV('CM1L:phaseRead').get()
-        self.laser_intensity = PV('RFGun:LaserIntensity1:Read').get()
+        self.laser_intensity1 = PV('RFGun:LaserIntensity1:Read').get()
+        self.laser_intensity2 = PV('RFGun:LaserIntensity2:Read').get()
+        self.machine_name = "ATF2"
 
     def log_messages(self,console):
         self.log=console or print
@@ -148,27 +163,49 @@ class InterfaceATF2_Linac(AbstractMachineInterface):
     def change_energy(self):
         pv = PV('CM1L:phaseWrite')
         rel_phase = 5
-        pv.put(self.phase_kl1+rel_phase)
-        time.sleep(1)
+        target = self.phase_kl1 + rel_phase
+        pv.put(target)
+        self._wait_for_pv_readback('CM1L:phaseRead', target)
         dP_P = 0.0 # we don't really know it
         return dP_P
         
     def reset_energy(self):
         pv = PV('CM1L:phaseWrite')
         pv.put(self.phase_kl1)
-        time.sleep(1)
+        self._wait_for_pv_readback('CM1L:phaseRead', self.phase_kl1)
 
-    def change_intensity(self, laserintensity=0.15):
-        print(f'Changing laser intensity to {laserintensity}...')
-        laser_intensity = float(laserintensity) * 100 * 5  # Korysko dixit: 100 for percent, 5 convesion factor
-        PV('RFGun:LaserIntensity1:Write').put(laser_intensity)
-        time.sleep(3)
+    def change_intensity(self, intensity=0.15):
+        print(f'Changing laser intensity to {intensity}...')
+        laser_intensity1 = 10000 * float(intensity) / self.laser_intensity2
+        PV('RFGun:LaserIntensity1:Write').put(laser_intensity1)
+        self._wait_for_pv_readback('RFGun:LaserIntensity1:Read', laser_intensity1)
         return self
 
     def reset_intensity(self):
         print('Resetting laser intensity...')
-        PV('RFGun:LaserIntensity1:Write').put(self.laser_intensity)
+        PV('RFGun:LaserIntensity1:Write').put(self.laser_intensity1)
+        self._wait_for_pv_readback('RFGun:LaserIntensity1:Read', self.laser_intensity1)
         return self
+
+    def get_beam_settings(self):
+        settings = {"energy": {}, "intensity": {}}
+        for section, name, pv_name in (("energy", "cm1l_phase", "CM1L:phaseRead"), ("intensity", "laser_intensity1", "RFGun:LaserIntensity1:Read")):
+            settings[section][name] = float(PV(pv_name).get())
+        return settings
+
+    def restore_beam_settings(self, settings):
+        settings = settings or {}
+        phase = settings.get("energy", {}).get("cm1l_phase")
+        if phase is not None:
+            target = float(phase)
+            PV('CM1L:phaseWrite').put(target)
+            self._wait_for_pv_readback('CM1L:phaseRead', target)
+        intensity = settings.get("intensity", {}).get("laser_intensity1")
+        if intensity is not None:
+            target = float(intensity)
+            PV('RFGun:LaserIntensity1:Write').put(target)
+            self._wait_for_pv_readback('RFGun:LaserIntensity1:Read', target)
+        return True
 
     def get_sequence(self):
         return self.sequence
@@ -209,10 +246,10 @@ class InterfaceATF2_Linac(AbstractMachineInterface):
         if isinstance(names, str):
             names = [names]
         if names is not None:
-            idx = np.array([i for i, s in enumerate(icts["names"]) if s in names])
+            idx = [i for i, s in enumerate(icts["names"]) if s in names]
             icts = {
-                "names": np.array(icts["names"])[idx],
-                "charge": np.array(icts["charge"])[idx],
+                "names": [icts["names"][i] for i in idx],
+                "charge": np.asarray(icts["charge"])[idx],
             }
         return icts
 
@@ -234,11 +271,11 @@ class InterfaceATF2_Linac(AbstractMachineInterface):
         if isinstance(names, str):
             names = [names]
         if names is not None:
-            idx = np.array([i for i, s in enumerate(correctors["names"]) if s in names])
+            idx = [i for i, s in enumerate(correctors["names"]) if s in names]
             correctors = {
-                "names": np.array(correctors["names"])[idx],
-                "bdes": np.array(correctors["bdes"])[idx],
-                "bact": np.array(correctors["bact"])[idx],
+                "names": [correctors["names"][i] for i in idx],
+                "bdes": np.asarray(correctors["bdes"])[idx],
+                "bact": np.asarray(correctors["bact"])[idx],
             }
 
         return correctors
@@ -271,12 +308,12 @@ class InterfaceATF2_Linac(AbstractMachineInterface):
         if isinstance(names, str):
             names = [names]
         if names is not None:
-            idx = np.array([i for i, s in enumerate(bpms["names"]) if s in names])
+            idx = [i for i, s in enumerate(bpms["names"]) if s in names]
             bpms = {
-                "names": np.array(bpms["names"])[idx],
-                "x": np.array(bpms["x"])[:, idx],
-                "y": np.array(bpms["y"])[:, idx],
-                "tmit": np.array(bpms["tmit"])[:, idx],
+                "names": [bpms["names"][i] for i in idx],
+                "x": np.asarray(bpms["x"])[:, idx],
+                "y": np.asarray(bpms["y"])[:, idx],
+                "tmit": np.asarray(bpms["tmit"])[:, idx],
             }
 
         return bpms
@@ -292,6 +329,9 @@ class InterfaceATF2_Linac(AbstractMachineInterface):
             return float(arr.flat[0])
         except Exception:
             return float(default)
+
+    def _wait_for_pv_readback(self, pv_name, target, tolerance=1e-3, timeout=10.0):
+        return self._wait_for_readback(lambda: self.make_safe_float(PV(pv_name).get(), default=np.nan), target, description=pv_name, tolerance=tolerance, timeout=timeout)
 
     def _wait_for_corrector_readback(self, corrector, target, tolerance=1e-4, timeout=1.0, poll_interval=0.05):
         readback_pv = PV(f'{corrector}:currentRead')
@@ -417,5 +457,3 @@ class InterfaceATF2_Linac(AbstractMachineInterface):
         else:
             out["Ttot"] = float("nan")
         return out
-
-

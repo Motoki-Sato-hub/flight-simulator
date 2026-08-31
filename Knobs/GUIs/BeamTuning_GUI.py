@@ -1885,7 +1885,7 @@ if __name__ == "__main__":
 
     project_name = dialog.selected_interface_name
     time_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-    dir_name = f"Data/{project_name}_{time_str}"
+    dir_name = f"Data/{project_name}{time_str}"
 
     window = MainWindow(I, dir_name)
     window.show()

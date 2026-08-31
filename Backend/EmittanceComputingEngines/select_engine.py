@@ -5,7 +5,7 @@ from Backend.EmittanceComputingEngines.ml_engine import MLEngine
 
 class EmittanceComputingEngineSelector:
     @staticmethod
-    def create(method, interface, session, machine_name="", info_callback=None, **kwargs):
+    def create(method, interface, session, machine_name="", info_callback=None, fallback_callback=None, **kwargs):
         method = str(method or "RFTrack tracking").strip()
         quad_name = str(session.get("quad_name", ""))
         screens = list(session.get("screens", []))
@@ -25,6 +25,8 @@ class EmittanceComputingEngineSelector:
 
             if info_callback:
                 info_callback("No ML model found. Using RFTrack instead.")
+
+            if fallback_callback: fallback_callback()
 
         if info_callback:
             info_callback("Using RFTrack tracking model.")

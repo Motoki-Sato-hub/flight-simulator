@@ -1,3 +1,4 @@
+import RF_Track as rft # do not touch this
 import os, sys, time
 from datetime import datetime
 import numpy as np
@@ -18,7 +19,8 @@ except ImportError:
     from PyQt5.QtCore import Qt, QTimer, QRect, QObject, QThread, pyqtSignal
     from PyQt5.QtGui import QPainter, QPixmap, QFont
 from Backend.SaveOrLoad import SaveOrLoad
-from MachineLearning.ML_dataset import generate_dataset, _get_interface_initial_settings
+from MachineLearning.ML_dataset import generate_dataset, _get_interface_initial_settings, append_dataset
+from MachineLearning.R_matrix_dataset import generate_dataset as generate_linear_response_dataset
 from MachineLearning.ML_train import TrainModel
 
 class SPositionDelegate(QStyledItemDelegate):
@@ -60,14 +62,15 @@ class DatasetGeneratorWorker(QObject):
     progress = pyqtSignal( int, int)
     log_message = pyqtSignal(str)
 
-    def __init__(self, interface, quad_name, screens, n_samples, relative_k_change, output_file):
+    def __init__(self, interface, quad_name, screens, n_samples, relative_k_change, output_file, linear_response=False):
         super().__init__()
         self.interface = interface
         self.quad_name = quad_name
         self.screens = screens
         self.n_samples = n_samples
-        self.k1_relative_change = relative_k_change
+        self.k1l_relative_change = relative_k_change
         self.output_file = output_file
+        self.linear_response = linear_response
         self.stop_requested = False
 
     def request_stop(self):
@@ -84,11 +87,24 @@ class DatasetGeneratorWorker(QObject):
 
     def run(self):
         try:
-            result = generate_dataset(quad_name=self.quad_name, screens=self.screens, interface = self.interface,
-                                      k1_relative_change=self.k1_relative_change,
-                                      n_samples = self.n_samples, output_file = self.output_file,
-                                      log_callback = self._emit_log, progress_callback = self._emit_progress,
-                                      stop_checker = self._should_stop)
+            if self.linear_response:
+                self._emit_log(f"Generating linear response dataset: {self.output_file}")
+                result = generate_linear_response_dataset(
+                    quad_name=self.quad_name, screens=self.screens, interface=self.interface,
+                    k1l_relative_change=(0.0, 0.0), n_samples=self.n_samples, output_file=self.output_file,
+                    log_callback=self._emit_log, progress_callback=self._emit_progress, stop_checker=self._should_stop,
+                )
+            else:
+                new_bounds = {
+                    "emit_x_norm": [3.5, 8.0],
+                    "beta_x0": [0.5, 3.5],
+                    "alpha_x0": [-3.0, 1.0],
+                    "emit_y_norm": [0.005, 0.2],
+                    "beta_y0": [6.0, 16.0],
+                    "alpha_y0": [-3.0, 2.0],
+                }
+                self._emit_log(f"Appending to dataset: {self.output_file}")
+                result = append_dataset(quad_name = self.quad_name, screens = self.screens, interface = self.interface, k1l_relative_change = self.k1l_relative_change, n_samples = self.n_samples, existing_file=self.output_file, new_bounds=new_bounds)
 
             self.finished.emit(result)
 
@@ -155,7 +171,8 @@ class MainWindow(QMainWindow, SaveOrLoad):
         self._load_logo()
         self.start_generation_button.clicked.connect(self._run_generating)
         self.stop_generation_button.clicked.connect(self._stop_generating)
-        self.start_training_button
+        self.start_training_button.clicked.connect(self._run_training)
+        self.stop_training_button.clicked.connect(self._stop_training)
         self.setWindowTitle("Emittance ML Dataset Generator")
         self.progressBar.setValue(0)
         self.quadrupoles_list.setItemDelegate(SPositionDelegate(self.quadrupoles_list))
@@ -183,7 +200,9 @@ class MainWindow(QMainWindow, SaveOrLoad):
         self._ml_stopped = None
         self._generation_thread = None
         self._generation_worker = None
-
+        self._is_training = False
+        self._training_thread = None
+        self._training_worker = None
 
     def _pause_task(self):
         pass
@@ -483,16 +502,23 @@ class MainWindow(QMainWindow, SaveOrLoad):
             return
 
         quad_name = quadrupoles[0]
+        linear_response = self.linear_response_checkbox.isChecked()
         relative_k_change = (float(self.k1_relative_min_spin.value()), float(self.k1_relative_max_spin.value()))
-        if relative_k_change[0] >= relative_k_change[1]:
-            QMessageBox.warning(self, "Error", "K1 relative min must be smaller than K1 relative max.")
+        if not linear_response and relative_k_change[0] >= relative_k_change[1]:
+            QMessageBox.warning(self, "Error", "K1L relative min must be smaller than K1L relative max.")
             return
         n_samples = int(self.samples_spin.value())
         output_dir = self.output_dir_edit.text().strip()
         if not output_dir:
-            output_dir = self._get_default_output_dir(quad_name, screens)
+            if linear_response:
+                output_dir = os.path.join(
+                    os.path.dirname(os.path.abspath(__file__)), "MachineLearning",
+                    self._get_machine_ml_folder_name(), str(quad_name),
+                )
+            else:
+                output_dir = self._get_default_output_dir(quad_name, screens)
         os.makedirs(output_dir, exist_ok=True)
-        output_file = os.path.join(output_dir, "EM_dataset.npz")
+        output_file = os.path.join(output_dir, "Linear_Response_dataset.npz" if linear_response else "EM_dataset.npz")
         self.log(f"Dataset output directory: {output_dir}")
         self._stop_requested = False
         self._is_running = True
@@ -508,6 +534,7 @@ class MainWindow(QMainWindow, SaveOrLoad):
             n_samples=n_samples,
             relative_k_change=relative_k_change,
             output_file=output_file,
+            linear_response=linear_response,
         )
         worker.moveToThread(thread)
         worker.log_message.connect(self.log)
@@ -552,11 +579,87 @@ class MainWindow(QMainWindow, SaveOrLoad):
         self._generation_thread = None
         self._generation_worker = None
 
-    def log(self, text):
+    def _run_training(self):
+        if self._is_training:
+            self.log("Model training already running", "model_training_log")
+            return
+
+        quadrupoles, screens = self._get_selection()
+        if not quadrupoles:
+            QMessageBox.warning(self, "Error", "No quadrupole selected.")
+            return
+        if not screens:
+            QMessageBox.warning(self, "Error", "No screens selected.")
+            return
+
+        quad_name = quadrupoles[0]
+        output_dir = self.output_dir_edit.text().strip() or self._get_default_output_dir(quad_name, screens)
+        dataset_file = os.path.join(output_dir, "EM_dataset.npz")
+        model_file = os.path.join(output_dir, "EM_model.pt")
+        if not os.path.isfile(dataset_file):
+            QMessageBox.warning(self, "Error", f"Dataset not found: {dataset_file}")
+            return
+
+        self._is_training = True
+        self.progressBar.setFormat("Model training: 0/0")
+        self.log(f"Starting model training for {quad_name}...", "model_training_log")
+
+        thread = QThread(self)
+        worker = ModelTrainerWorker(
+            screens=screens,
+            quad_name=quad_name,
+            machine_name=self._get_machine_ml_folder_name(),
+            dataset_file=dataset_file,
+            model_file=model_file,
+        )
+        worker.moveToThread(thread)
+        worker.log_message.connect(lambda text: self.log(text, "model_training_log"))
+        worker.progress.connect(self._on_training_progress)
+        worker.finished.connect(self._on_training_finished)
+        worker.error.connect(self._on_training_error)
+        worker.done.connect(thread.quit)
+        worker.done.connect(worker.deleteLater)
+        thread.finished.connect(self._on_training_thread_finished)
+        thread.finished.connect(thread.deleteLater)
+        thread.started.connect(worker.run)
+
+        self._training_thread = thread
+        self._training_worker = worker
+        thread.start()
+
+    def _on_training_progress(self, current, total):
+        total = max(int(total), 1)
+        current = max(0, min(int(current), total))
+        self._set_progress(current / total * 100)
+        self.progressBar.setFormat(f"Model training: {current}/{total}")
+
+    def _on_training_finished(self, metrics):
+        self._set_progress(100)
+        self.progressBar.setFormat("Model training finished")
+        self.log(f"Finished training model: {metrics}", "model_training_log")
+        QMessageBox.information(self, "Finished", "Model training finished.")
+
+    def _on_training_error(self, message):
+        self._set_progress(0)
+        self.log(f"Error in training model. {message}", "model_training_log")
+        QMessageBox.information(self, "Error", f"Error in training model. {message}")
+
+    def _stop_training(self):
+        self.log("Stopping model training requested.", "model_training_log")
+        if self._training_worker is not None:
+            self._training_worker.request_stop()
+
+    def _on_training_thread_finished(self):
+        self._is_training = False
+        self._training_thread = None
+        self._training_worker = None
+
+    def log(self, text, widget_name="log_console"):
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         line = f"[{timestamp}] {text}"
-        if hasattr(self, "log_console"):
-            self.log_console.appendPlainText(line)
+        widget = getattr(self, widget_name, None)
+        if widget is not None:
+            widget.appendPlainText(line)
         else:
             print(line)
 
@@ -578,9 +681,7 @@ if __name__ == "__main__":
     )
 
     time_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-    dir_name = os.path.expanduser(
-        f"~/flight-simulator-data/EM_{project_name}_{time_str}"
-    )
+    dir_name = os.path.expanduser(f"~/CERN-Flight_Simulator-Data/EM_{project_name}{time_str}")
 
     w = MainWindow(interface, dir_name)
     w.show()

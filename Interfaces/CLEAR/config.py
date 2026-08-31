@@ -127,6 +127,8 @@ calibrated_cameras = [
     'CA.BTV0805',
     'CA.BTV0810',
     'CA.BTV0910'
+    # CA.BTV0235, 545, 800, 805, 875,
+
 ]
 
 # Quadrupoole magnet calibration

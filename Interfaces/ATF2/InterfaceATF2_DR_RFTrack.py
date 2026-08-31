@@ -37,6 +37,7 @@ class InterfaceATF2_DR_RFTrack(AbstractMachineInterface):
         # validated momentum acceptance of this transverse-only ring model.
         self.dfs_test_energy = 0.995
         self.wfs_test_charge = 0.90
+        self._beam_mode = "nominal"
         self.Q=-1
         self.electronmass = rft.electronmass
         # Interface corrector values are converted with strength = value / 10.
@@ -57,6 +58,12 @@ class InterfaceATF2_DR_RFTrack(AbstractMachineInterface):
         self.__track_bunch()
         self._saved_sextupoles_state = None
         self.sextupoles = self._get_element_names_from_twiss_types({"SEXTUPOLE"})
+        self.machine_name = "ATF2"
+        self.lattice.align_elements()
+        '''Uncomment lines below to scatter elements in the lattice.'''
+        # self.lattice.scatter_elements('bpm', 0.100, 0.100, 0, 0, 0, 0, 'center')
+        # self.lattice.scatter_elements('quadrupole', 0.100, 0.100, 0, 0, 0, 0, 'center')
+
 
     def _get_element_names_from_twiss_types(self, allowed_types): # because rf track doesn't have get sextupoles
         with open(self.twiss_path, "r") as file:
@@ -192,32 +199,39 @@ class InterfaceATF2_DR_RFTrack(AbstractMachineInterface):
         )
         I=tracked_bunch.get_info()
         self.log("Emittance after tracking:")
-        self.log(f"εx = {I.emitt_x}[mm.rad]")
-        self.log(f"εy = {I.emitt_y}[mm.rad]")
-        self.log(f"εz = {I.emitt_z}[mm.permille]")
+        self.log(f"εx = {I.emitt_x} [mm.mrad]")
+        self.log(f"εy = {I.emitt_y} [mm.mrad]")
+        self.log(f"εz = {I.emitt_z} [mm.permille]")
 
     def get_beam_factors(self):
         gamma_rel = np.sqrt((self.Pref / self.electronmass) ** 2 + 1.0)
         beta_rel = np.sqrt(1.0 - 1.0 / gamma_rel ** 2)
-        return gamma_rel, beta_rel
+        beta_gamma = gamma_rel * beta_rel
+        if not np.isfinite(beta_gamma) or beta_gamma <= 0:
+            raise RuntimeError("Invalid beam factors")
+        return gamma_rel, beta_rel, beta_gamma
 
     def change_energy(self):
         self.__setup_beam1()
         self.__track_bunch()
+        self._beam_mode = "energy_changed"
         dP_P = self.dfs_test_energy - 1.0
         return dP_P
 
     def reset_energy(self):
         self.__setup_beam0()
         self.__track_bunch()
+        self._beam_mode = "nominal"
 
     def change_intensity(self): #reduced charge
         self.__setup_beam2()
         self.__track_bunch()
+        self._beam_mode = "intensity_changed"
 
     def reset_intensity(self):
         self.__setup_beam0()
         self.__track_bunch()
+        self._beam_mode = "nominal"
 
     def get_sequence(self):
         return self.sequence
@@ -426,10 +440,10 @@ class InterfaceATF2_DR_RFTrack(AbstractMachineInterface):
         if isinstance(names, str):
             names = [names]
         if names is not None:
-            idx = np.array([i for i, s in enumerate(icts["names"]) if s in names])
+            idx = [i for i, s in enumerate(icts["names"]) if s in names]
             icts = {
-                "names": np.array(icts["names"])[idx],
-                "charge": np.array(icts["charge"])[idx],
+                "names": [icts["names"][i] for i in idx],
+                "charge": np.asarray(icts["charge"])[idx],
             }
 
         return icts
@@ -448,11 +462,11 @@ class InterfaceATF2_DR_RFTrack(AbstractMachineInterface):
         if isinstance(names, str):
             names = [names]
         if names is not None:
-            idx = np.array([i for i, s in enumerate(correctors["names"]) if s in names])
+            idx = [i for i, s in enumerate(correctors["names"]) if s in names]
             correctors = {
-                "names": np.array(correctors["names"])[idx],
-                "bdes": np.array(correctors["bdes"])[idx],
-                "bact": np.array(correctors["bact"])[idx],
+                "names": [correctors["names"][i] for i in idx],
+                "bdes": np.asarray(correctors["bdes"])[idx],
+                "bact": np.asarray(correctors["bact"])[idx],
             }
 
         return correctors
@@ -476,12 +490,12 @@ class InterfaceATF2_DR_RFTrack(AbstractMachineInterface):
         if isinstance(names, str):
             names = [names]
         if names is not None:
-            idx = np.array([i for i, s in enumerate(bpms["names"]) if s in names])
+            idx = [i for i, s in enumerate(bpms["names"]) if s in names]
             bpms = {
-                "names": np.array(bpms["names"])[idx],
-                "x": np.array(bpms["x"])[:, idx],
-                "y": np.array(bpms["y"])[:, idx],
-                "tmit": np.array(bpms["tmit"])[:, idx],
+                "names": [bpms["names"][i] for i in idx],
+                "x": np.asarray(bpms["x"])[:, idx],
+                "y": np.asarray(bpms["y"])[:, idx],
+                "tmit": np.asarray(bpms["tmit"])[:, idx],
             }
 
         return bpms
@@ -495,7 +509,7 @@ class InterfaceATF2_DR_RFTrack(AbstractMachineInterface):
             if not isinstance(elements, list):
                 elements = [elements]
 
-            k1_values = []
+            k1l_values = []
             for element in elements:
                 try:
                     strength = element.get_K1(self.Pref / self.Q)
@@ -503,22 +517,22 @@ class InterfaceATF2_DR_RFTrack(AbstractMachineInterface):
                     continue
                 if isinstance(strength, (list, tuple, np.ndarray)):
                     if len(strength) > 0:
-                        k1_values.append(float(strength[0]))
+                        k1l_values.append(float(strength[0]))
                 else:
-                    k1_values.append(float(strength))
+                    k1l_values.append(float(strength))
 
-            bdes[i] = k1_values[0] if k1_values else 0.0
+            bdes[i] = k1l_values[0] if k1l_values else 0.0
 
         quadrupoles = {"names": self.quadrupoles, "bdes": bdes, "bact": bdes.copy()}
 
         if isinstance(names, str):
             names = [names]
         if names is not None:
-            idx = np.array([i for i, s in enumerate(quadrupoles["names"]) if s in names])
+            idx = [i for i, s in enumerate(quadrupoles["names"]) if s in names]
             quadrupoles = {
-                "names": np.array(quadrupoles["names"])[idx],
-                "bdes": np.array(quadrupoles["bdes"])[idx],
-                "bact": np.array(quadrupoles["bact"])[idx],
+                "names": [quadrupoles["names"][i] for i in idx],
+                "bdes": np.asarray(quadrupoles["bdes"])[idx],
+                "bact": np.asarray(quadrupoles["bact"])[idx],
             }
 
         return quadrupoles
@@ -560,40 +574,6 @@ class InterfaceATF2_DR_RFTrack(AbstractMachineInterface):
                 self.lattice[corr].vary_strength(0.0, val / 10)
         self.__track_bunch()
 
-    def vary_quadrupoles(self, names, delta_values):
-        if not isinstance(names, list):
-            names = [names]
-        if not isinstance(delta_values, (list, tuple, np.ndarray)):
-            delta_values = [delta_values]
-        for quadrupole_name, val in zip(names, delta_values):
-            elements = self.lattice[quadrupole_name]
-            if not isinstance(elements, list):
-                elements = [elements]
-            current_values=[]
-            for element in elements:
-                current=element.get_K1(self.Pref / self.Q)
-                current=float(current[0]) if isinstance(current, (list, tuple,np.ndarray)) else float(current)
-                current_values.append(current)
-            if len(current_values)>1 and not np.allclose(current_values, current_values[0], rtol=0.0, atol=1e-12):
-                self.log(f"Parts of quadrupole {quadrupole_name} have different values")
-            target_value=(current_values[0] if len(current_values)>0 else 0.0) +float(val)
-            for element in elements:
-                element.set_K1(self.Pref / self.Q,target_value)
-
-        self.__track_bunch()
-
-    def align_everything(self):
-        self.lattice.align_elements()
-        self.__track_bunch()
-
-    def misalign_quadrupoles(self,sigma_x=0.02,sigma_y=0.02):
-        self.lattice.scatter_elements('quadrupole', sigma_x, sigma_y, 0, 0, 0, 0, 'center')
-        self.__track_bunch()
-
-    def misalign_bpms(self,sigma_x=0.100,sigma_y=0.100):
-        self.lattice.scatter_elements('bpm', sigma_x, sigma_y, 0, 0, 0, 0, 'center')
-        self.__track_bunch()
-
     def get_sextupoles(self, names = None):
         self.log("Reading sextupoles' strengths...")
         bdes = np.zeros(len(self.sextupoles), dtype=float)
@@ -629,11 +609,11 @@ class InterfaceATF2_DR_RFTrack(AbstractMachineInterface):
         if isinstance(names, str):
             names = [names]
         if names is not None:
-            idx = np.array([i for i, s in enumerate(sextupoles["names"]) if s in names])
+            idx = [i for i, s in enumerate(sextupoles["names"]) if s in names]
             sextupoles = {
-                "names": np.array(sextupoles["names"])[idx],
-                "bdes": np.array(sextupoles["bdes"])[idx],
-                "bact": np.array(sextupoles["bact"])[idx],
+                "names": [sextupoles["names"][i] for i in idx],
+                "bdes": np.asarray(sextupoles["bdes"])[idx],
+                "bact": np.asarray(sextupoles["bact"])[idx],
             }
         return sextupoles
 

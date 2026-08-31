@@ -1,15 +1,12 @@
 import sys, time
 from pathlib import Path
-from Interfaces.interface_setup import INTERFACE_SETUP
-import numpy as np
-
 THIS_FILE = Path(__file__).resolve()
 PROJECT_ROOT = THIS_FILE.parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
+from Interfaces.interface_setup import INTERFACE_SETUP
+import numpy as np
 
-OUTPUT_FILE = PROJECT_ROOT / "MachineLearning" / "R_matrix_dataset_fixedK1.npz"
-N_SAMPLES = 2000
 RANDOM_SEED = 2137
 
 PARAMETER_NAMES = [
@@ -44,7 +41,7 @@ def samples_uniform(rng, bounds, name):
     low, high = bounds[name]
     return float(rng.uniform(low, high))
 
-def get_nominal_K1(interface, quad_name):
+def get_nominal_K1L(interface, quad_name):
     quads = interface.get_quadrupoles()
     names = list(quads["names"])
     strengths = np.asarray(quads["bdes"], dtype=float)
@@ -65,19 +62,22 @@ def build_sample(rng, bounds):
         emit_y_norm, beta_y0, alpha_y0,
     ], dtype=float)
 
-def generate_dataset(quad_name, screens, interface, k1_relative_change, n_samples, output_file, log_callback, progress_callback, stop_checker):
+def generate_dataset(quad_name, screens, interface, k1l_relative_change, n_samples, output_file, log_callback, progress_callback, stop_checker):
     rng = np.random.default_rng(RANDOM_SEED)
     log = log_callback if callable(log_callback) else print
     n_samples = int(n_samples)
     output_file = Path(output_file)
     output_file.parent.mkdir(parents=True, exist_ok=True)
-    K1_nominal = get_nominal_K1(interface, quad_name)
+    K1L_nominal = get_nominal_K1L(interface, quad_name)
     bounds = _get_interface_bounds(interface)
+    gamma_rel, beta_rel, beta_gamma = interface.get_beam_factors()
 
-    fixed_k1 = float(K1_nominal)
+    if not np.isfinite(beta_gamma) or beta_gamma <= 0:
+        raise RuntimeError(f"Invalid beta_gamma from interface: {beta_gamma}")
+    fixed_k1l = float(K1L_nominal)
 
-    log(f"{quad_name} nominal/fixed K1: {fixed_k1}")
-    log(f"Generating {n_samples} rows with fixed lattice and fixed K1.")
+    log(f"{quad_name} nominal/fixed K1L: {fixed_k1l}")
+    log(f"Generating {n_samples} rows with fixed lattice and fixed K1L.")
     log(f"Only incoming beam parameters are varied.")
     log(f"Screens: {screens}")
     log(f"Output file: {output_file}")
@@ -96,12 +96,12 @@ def generate_dataset(quad_name, screens, interface, k1_relative_change, n_sample
             break
         twiss_parameters = build_sample(rng, bounds)
         emit_x_norm, beta_x0, alpha_x0, emit_y_norm, beta_y0, alpha_y0 = twiss_parameters
-        K1_array = np.array([fixed_k1], dtype=float)
+        K1L_array = np.array([fixed_k1l], dtype=float)
         try:
             pred_sigx, pred_sigy = interface.predict_emittance_scan_response(
                 quad_name=quad_name,
                 screens=screens,
-                K1_values=np.asarray(K1_array, dtype=float),
+                K1L_values=np.asarray(K1L_array, dtype=float),
                 emit_x=emit_x_norm,
                 emit_y=emit_y_norm,
                 beta_x0=beta_x0,
@@ -111,7 +111,7 @@ def generate_dataset(quad_name, screens, interface, k1_relative_change, n_sample
                 reference_screen=screens[0],
                 stop_checker=None,
             )
-            required_shape = (len(K1_array), len(screens))
+            required_shape = (len(K1L_array), len(screens))
             if pred_sigx.shape != required_shape or pred_sigy.shape != required_shape:
                 raise RuntimeError(f"Shapes are mismatched.")
 
@@ -158,14 +158,17 @@ def generate_dataset(quad_name, screens, interface, k1_relative_change, n_sample
         screens=np.array(screens),
         quad_name=np.array(quad_name),
         reference_screen=np.array(screens[0]),
-        K1_fixed=np.array(fixed_k1, dtype=float),
-        K1_relative_change=np.array(k1_relative_change, dtype=float),
+        K1L_fixed=np.array(fixed_k1l, dtype=float),
+        K1L_relative_change=np.array(k1l_relative_change, dtype=float),
         bounds=np.array([bounds[name] for name in PARAMETER_NAMES], dtype=float),
         bounds_names=np.array(PARAMETER_NAMES),
         interface_class_name=np.array(interface.__class__.__name__),
         interface_module=np.array(interface.__class__.__module__),
-        K1_nominal=np.array(K1_nominal, dtype=float),
+        K1L_nominal=np.array(K1L_nominal, dtype=float),
         n_requested_samples = np.array(n_samples, dtype=int),
+        beta_gamma=np.array(beta_gamma, dtype=float),
+        gamma_rel=np.array(gamma_rel, dtype=float),
+        beta_rel=np.array(beta_rel, dtype=float),
     )
 
     log("Done.")
@@ -180,31 +183,5 @@ def generate_dataset(quad_name, screens, interface, k1_relative_change, n_sample
         "Y_shape": Y.shape,
         "failed": int(failed),
         "valid": int(X.shape[0]),
-        "K1_fixed": float(fixed_k1),
+        "K1L_fixed": float(fixed_k1l),
     }
-
-def main():
-    from Interfaces.ATF2.InterfaceATF2_Ext_RFTrack import InterfaceATF2_Ext_RFTrack
-
-    interface = InterfaceATF2_Ext_RFTrack(nparticles=1000)
-
-    quad_name = "QD18X"
-    screens = list(interface.get_screens()["names"])
-
-    print("Generating R-matrix fixed-K1 dataset")
-
-    generate_dataset(
-        quad_name=quad_name,
-        screens=screens,
-        interface=interface,
-        k1_relative_change=(0.0, 0.0),
-        n_samples=N_SAMPLES,
-        output_file=OUTPUT_FILE,
-        log_callback=print,
-        progress_callback=None,
-        stop_checker=None,
-    )
-
-
-if __name__ == "__main__":
-    main()

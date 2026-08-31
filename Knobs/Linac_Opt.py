@@ -975,8 +975,7 @@ class OptimizationWorker(QThread):
     # ----------------------------
 
     def _read_icts(self) -> Tuple[Dict[str, float], bool, str]:
-        return _read_icts_with_retry(
-            self.interface,
+        return _read_icts_with_retry(self.interface,
             downstream_key=self._downstream_ict_key,
             sample_count=self.ict_samples,
             sample_interval_s=self.ict_sample_interval_s,

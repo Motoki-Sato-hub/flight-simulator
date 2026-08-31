@@ -1,0 +1,642 @@
+{
+  "_comment": [
+    "CLEAR BTV camera configuration.",
+    "",
+    "Top-level key: BTV device name as it appears in the BTVDC FESA instantiation XML (e.g. 'CA.BTV0810').",
+    "",
+    "Fields:",
+    "  digiCamDevice       – FESA device name of the associated DigiCam (image source).",
+    "  rotate              – number of 90-degree CCW turns applied to the raw image (0-3).",
+    "  flip_hor            – mirror horizontally before display (0 or 1).",
+    "  flip_ver            – mirror vertically before display (0 or 1).",
+    "  controlDeviceName   – FESA device name of the filter/lamp controller, null if none.",
+    "  controlDeviceType   – controller family string, e.g. 'BTVCTRL'. null if no controller.",
+    "  controlDeviceFields – type-specific controller parameters (object, empty when no controller).",
+    "                        BTVCTRL: { 'system': 1 or 2 }  (which DCM sub- ch to address)",
+    "                        Other types will add their own fields here without changing the schema.",
+    "  fixValueLamps       – true/false/null (null = unknown, device not in any parsed XML).",
+    "  filterInstalled     – whether a filter wheel is present.",
+    "  firstLampInstalled  – whether lamp 1 is present.",
+    "  screenInstalled     – whether the screen mechanism is physically present.",
+    "  secondLampInstalled – whether lamp 2 is present.",
+    "",
+    "  screenMoverDevice   – FESA device that moves the screen, or null.",
+    "                        null  → screen is driven by the standard BTVCTRL screen command (most devices).",
+    "                        str   → custom mover device; use screenMoverType/Fields for routing.",
+    "  screenMoverType     – device family of the custom mover, e.g. 'BStepMotorVME'. null for standard.",
+    "  screenMoverFields   – type-specific mover parameters, or null for standard devices.",
+    "                        BStepMotorVME: { 'setpoints': { label: integer_value, ... } }",
+    "                        The set/get FESA property names for each mover type are fixed",
+    "                        constants in the Python code (not stored here).",
+    "                        CA.BTV0875 note: screen uses CA.AIR-TS.BOX1.01 (BStepMotorVME);",
+    "                        the BTVCTRL still handles filter and lamps for that device.",
+    "",
+    "Devices marked 'XML source: BTVConc_DU.cfv-2010-btvclex1.xml' were extracted automatically.",
+    "CS.* devices are retained from the previous config; hardware-installed fields are unknown."
+  ],
+
+  "devices": {
+
+    "CA.BTV0125": {
+      "digiCamDevice":       "CA.BTV0125.DigiCam",
+      "rotate": 0, "flip_hor": 0, "flip_ver": 0,
+      "controlDeviceName":   "CA.BTV0125_CA.BTV0215",
+      "controlDeviceType":   "BTVCTRL",
+      "controlDeviceFields": { "system": 1 },
+      "fixValueLamps":       true,
+      "filterInstalled":     false,
+      "firstLampInstalled":  true,
+      "screenInstalled":     true,
+      "secondLampInstalled": true,
+      "screenMoverDevice":   null,
+      "screenMoverType":     null,
+      "screenMoverFields":   null
+    },
+
+    "CA.BTV0215": {
+      "digiCamDevice":       "CA.BTV0215.DigiCam",
+      "rotate": 0, "flip_hor": 0, "flip_ver": 0,
+      "controlDeviceName":   "CA.BTV0125_CA.BTV0215",
+      "controlDeviceType":   "BTVCTRL",
+      "controlDeviceFields": { "system": 2 },
+      "fixValueLamps":       false,
+      "filterInstalled":     true,
+      "firstLampInstalled":  true,
+      "screenInstalled":     true,
+      "secondLampInstalled": true,
+      "screenMoverDevice":   true,
+      "screenMoverType":     null,
+      "screenMoverFields":   null
+    },
+
+    "CA.BTV0235": {
+      "digiCamDevice":       "CA.BTV0235.DigiCam",
+      "rotate": 0, "flip_hor": 0, "flip_ver": 0,
+      "controlDeviceName":   "CA.BTV0235_CA.BTV0545",
+      "controlDeviceType":   "BTVCTRL",
+      "controlDeviceFields": { "system": 1 },
+      "fixValueLamps":       false,
+      "filterInstalled":     true,
+      "firstLampInstalled":  true,
+      "screenInstalled":     true,
+      "secondLampInstalled": true,
+      "screenMoverDevice":   true,
+      "screenMoverType":     null,
+      "screenMoverFields":   null
+    },
+
+    "CA.BTV0390": {
+      "digiCamDevice":       "CA.BTV0390.DigiCam",
+      "rotate": 3, "flip_hor": 0, "flip_ver": 0,
+      "controlDeviceName":   "CA.BTV0390_CAS.BTV0420",
+      "controlDeviceType":   "BTVCTRL",
+      "controlDeviceFields": { "system": 1 },
+      "fixValueLamps":       false,
+      "filterInstalled":     true,
+      "firstLampInstalled":  true,
+      "screenInstalled":     true,
+      "secondLampInstalled": true,
+      "screenMoverDevice":   true,
+      "screenMoverType":     null,
+      "screenMoverFields":   null
+    },
+
+    "CAS.BTV0420": {
+      "digiCamDevice":       "CAS.BTV0420.DigiCam",
+      "rotate": 0, "flip_hor": 0, "flip_ver": 0,
+      "controlDeviceName":   "CA.BTV0390_CAS.BTV0420",
+      "controlDeviceType":   "BTVCTRL",
+      "controlDeviceFields": { "system": 2 },
+      "fixValueLamps":       false,
+      "filterInstalled":     true,
+      "firstLampInstalled":  true,
+      "screenInstalled":     true,
+      "secondLampInstalled": true,
+      "screenMoverDevice":   true,
+      "screenMoverType":     null,
+      "screenMoverFields":   null
+    },
+
+    "CAS.BTV0440": {
+      "digiCamDevice":       "CAS.BTV0440.DigiCam",
+      "rotate": 0, "flip_hor": 0, "flip_ver": 0,
+      "controlDeviceName":   "CAS.BTV0440_CA.BTV0620",
+      "controlDeviceType":   "BTVCTRL",
+      "controlDeviceFields": { "system": 1 },
+      "fixValueLamps":       false,
+      "filterInstalled":     true,
+      "firstLampInstalled":  true,
+      "screenInstalled":     true,
+      "secondLampInstalled": true,
+      "screenMoverDevice":   true,
+      "screenMoverType":     null,
+      "screenMoverFields":   null
+    },
+
+    "CAS.CAMVESPER1": {
+      "digiCamDevice":       "CAS.CAMVESPER1.DigiCam",
+      "rotate": 0, "flip_hor": 0, "flip_ver": 0,
+      "controlDeviceName":   null,
+      "controlDeviceType":   null,
+      "controlDeviceFields": null, 
+      "fixValueLamps":       false,
+      "filterInstalled":     false,
+      "firstLampInstalled":  false,
+      "screenInstalled":     false,
+      "secondLampInstalled": false,
+      "screenMoverDevice":   null,
+      "screenMoverType":     null,
+      "screenMoverFields":   null
+    },
+
+    "CA.BTV0545": {
+      "digiCamDevice":       "CA.BTV0545.DigiCam",
+      "rotate": 0, "flip_hor": 0, "flip_ver": 0,
+      "controlDeviceName":   "CA.BTV0235_CA.BTV0545",
+      "controlDeviceType":   "BTVCTRL",
+      "controlDeviceFields": { "system": 2 },
+      "fixValueLamps":       false,
+      "filterInstalled":     true,
+      "firstLampInstalled":  true,
+      "screenInstalled":     true,
+      "secondLampInstalled": true,
+      "screenMoverDevice":   true,
+      "screenMoverType":     null,
+      "screenMoverFields":   null
+    },
+
+    "CA.BTV0620": {
+      "digiCamDevice":       "CA.BTV0620.DigiCam",
+      "rotate": 0, "flip_hor": 0, "flip_ver": 0,
+      "controlDeviceName":   "CAS.BTV0440_CA.BTV0620",
+      "controlDeviceType":   "BTVCTRL",
+      "controlDeviceFields": { "system": 2 },
+      "fixValueLamps":       false,
+      "filterInstalled":     true,
+      "firstLampInstalled":  true,
+      "screenInstalled":     true,
+      "secondLampInstalled": true,
+      "screenMoverDevice":   true,
+      "screenMoverType":     null,
+      "screenMoverFields":   null
+    },
+
+    "CA.BTV0730": {
+      "digiCamDevice":       "CA.BTV0730.DigiCam",
+      "rotate": 0, "flip_hor": 0, "flip_ver": 0,
+      "controlDeviceName":   "CA.BTV0730_CA.BTV0800",
+      "controlDeviceType":   "BTVCTRL",
+      "controlDeviceFields": { "system": 1 },
+      "fixValueLamps":       false,
+      "filterInstalled":     true,
+      "firstLampInstalled":  true,
+      "screenInstalled":     true,
+      "secondLampInstalled": true,
+      "screenMoverDevice":   true,
+      "screenMoverType":     null,
+      "screenMoverFields":   null
+    },
+
+    "CA.BTV0800": {
+      "digiCamDevice":       "CA.BTV0800.DigiCam",
+      "rotate": 0, "flip_hor": 0, "flip_ver": 0,
+      "controlDeviceName":   "CA.BTV0730_CA.BTV0800",
+      "controlDeviceType":   "BTVCTRL",
+      "controlDeviceFields": { "system": 2 },
+      "fixValueLamps":       false,
+      "filterInstalled":     true,
+      "firstLampInstalled":  true,
+      "screenInstalled":     true,
+      "secondLampInstalled": true,
+      "screenMoverDevice":   true,
+      "screenMoverType":     null,
+      "screenMoverFields":   null
+    },
+
+    "CA.BTV0805": {
+      "digiCamDevice":       "CA.BTV0805.DigiCam",
+      "rotate": 0, "flip_hor": 0, "flip_ver": 0,
+      "controlDeviceName":   "CA.BTV0805_CA.BTV0810",
+      "controlDeviceType":   "BTVCTRL",
+      "controlDeviceFields": { "system": 1 },
+      "fixValueLamps":       false,
+      "filterInstalled":     true,
+      "firstLampInstalled":  true,
+      "screenInstalled":     true,
+      "secondLampInstalled": true,
+      "screenMoverDevice":   true,
+      "screenMoverType":     null,
+      "screenMoverFields":   null
+    },
+
+    "CA.BTV0810": {
+      "digiCamDevice":       "CA.BTV0810.DigiCam",
+      "rotate": 0, "flip_hor": 0, "flip_ver": 0,
+      "controlDeviceName":   "CA.BTV0805_CA.BTV0810",
+      "controlDeviceType":   "BTVCTRL",
+      "controlDeviceFields": { "system": 2 },
+      "fixValueLamps":       false,
+      "filterInstalled":     true,
+      "firstLampInstalled":  true,
+      "screenInstalled":     true,
+      "secondLampInstalled": true,
+      "screenMoverDevice":   true,
+      "screenMoverType":     null,
+      "screenMoverFields":   null
+    },
+
+    "CA.BTV0875": {
+      "digiCamDevice":       "CA.BTV0875.DigiCam",
+      "rotate": 0, "flip_hor": 0, "flip_ver": 0,
+      "controlDeviceName":   "CA.BTV0875_CA.BTV9999",
+      "controlDeviceType":   "BTVCTRL",
+      "controlDeviceFields": { "system": 1 },
+      "fixValueLamps":       false,
+      "filterInstalled":     true,
+      "firstLampInstalled":  true,
+      "screenInstalled":     true,
+      "secondLampInstalled": true,
+      "screenMoverDevice":   "CA.AIR-TS.BOX1.01",
+      "screenMoverType":     "BStepMotorVME",
+      "screenMoverFields": {
+        "setpoints": {
+          "out":    0,
+          "old scat":  -33186,
+          "new scat":  -26586,
+          "screen":    -52052
+        }
+      }
+    },
+
+    "CA.BTV0910": {
+      "digiCamDevice":       "CA.BTV0910.DigiCam",
+      "rotate": 0, "flip_hor": 0, "flip_ver": 0,
+      "controlDeviceName":   "CA.BTV0910_CAS.BTV0930",
+      "controlDeviceType":   "BTVCTRL",
+      "controlDeviceFields": { "system": 1 },
+      "fixValueLamps":       false,
+      "filterInstalled":     true,
+      "firstLampInstalled":  true,
+      "screenInstalled":     true,
+      "secondLampInstalled": true,
+      "screenMoverDevice":   true,
+      "screenMoverType":     null,
+      "screenMoverFields":   null
+    },
+
+    "CAS.BTV0930": {
+      "digiCamDevice":       "CAS.BTV0930.DigiCam",
+      "rotate": 0, "flip_hor": 0, "flip_ver": 0,
+      "controlDeviceName":   "CA.BTV0910_CAS.BTV0930",
+      "controlDeviceType":   "BTVCTRL",
+      "controlDeviceFields": { "system": 2 },
+      "fixValueLamps":       false,
+      "filterInstalled":     true,
+      "firstLampInstalled":  true,
+      "screenInstalled":     true,
+      "secondLampInstalled": true,
+      "screenMoverDevice":   true,
+      "screenMoverType":     null,
+      "screenMoverFields":   null
+    },
+
+    "CA.CAMAIR1": {
+      "digiCamDevice":       "CA.CAMAIR1.DigiCam",
+      "rotate": 0, "flip_hor": 0, "flip_ver": 0,
+      "controlDeviceName":   null,
+      "controlDeviceType":   null,
+      "controlDeviceFields": null, 
+      "fixValueLamps":       false,
+      "filterInstalled":     false,
+      "firstLampInstalled":  false,
+      "screenInstalled":     false,
+      "secondLampInstalled": false,
+      "screenMoverDevice":   "CA.AIR-TS.BOX1.XX",
+      "screenMoverType":     "BStepMotorVME",
+      "screenMoverFields": {
+        "setpoints": {
+          "out":    0,
+          "screen": -13000,
+          "old scat":  -33186,
+          "new scat":  -26586
+        }
+      }
+    },
+
+    "CA.CAMAIR2": {
+      "digiCamDevice":       "CA.CAMAIR2.DigiCam",
+      "rotate": 0, "flip_hor": 0, "flip_ver": 0,
+      "controlDeviceName":   null,
+      "controlDeviceType":   null,
+      "controlDeviceFields": null, 
+      "fixValueLamps":       false,
+      "filterInstalled":     false,
+      "firstLampInstalled":  false,
+      "screenInstalled":     false,
+      "secondLampInstalled": false,
+      "screenMoverDevice":   "CA.AIR-TS.BOX1.XX",
+      "screenMoverType":     "BStepMotorVME",
+      "screenMoverFields": {
+        "setpoints": {
+          "out":    0,
+          "screen": -13000,
+          "old scat":  -33186,
+          "new scat":  -26586
+        }
+      }
+    },
+
+    "CA.CAMAIR3": {
+      "digiCamDevice":       "CA.CAMAIR3.DigiCam",
+      "rotate": 0, "flip_hor": 0, "flip_ver": 0,
+      "controlDeviceName":   null,
+      "controlDeviceType":   null,
+      "controlDeviceFields": null, 
+      "fixValueLamps":       false,
+      "filterInstalled":     false,
+      "firstLampInstalled":  false,
+      "screenInstalled":     false,
+      "secondLampInstalled": false,
+      "screenMoverDevice":   "CA.AIR-TS.BOX1.XX",
+      "screenMoverType":     "BStepMotorVME",
+      "screenMoverFields": {
+        "setpoints": {
+          "out":    0,
+          "screen": -13000,
+          "old scat":  -33186,
+          "new scat":  -26586
+        }
+      }
+    },
+
+    "CA.CAMAIR4": {
+      "digiCamDevice":       "CA.CAMAIR4.DigiCam",
+      "rotate": 0, "flip_hor": 0, "flip_ver": 0,
+      "controlDeviceName":   null,
+      "controlDeviceType":   null,
+      "controlDeviceFields": null, 
+      "fixValueLamps":       false,
+      "filterInstalled":     false,
+      "firstLampInstalled":  false,
+      "screenInstalled":     false,
+      "secondLampInstalled": false,
+      "screenMoverDevice":   "CA.AIR-TS.BOX1.XX",
+      "screenMoverType":     "BStepMotorVME",
+      "screenMoverFields": {
+        "setpoints": {
+          "out":    0,
+          "screen": -13000,
+          "old scat":  -33186,
+          "new scat":  -26586
+        }
+      }
+    },
+
+
+
+    "CS.BTV0120": {
+      "digiCamDevice":       "CS.BTV0120.DigiCam",
+      "rotate": 0, "flip_hor": 0, "flip_ver": 0,
+      "controlDeviceName":   "CS.BTV0120_CS.BTV0305",
+      "controlDeviceType":   "BTVCTRL",
+      "controlDeviceFields": { "system": 1 },
+      "fixValueLamps":       false,
+      "filterInstalled":     true,
+      "firstLampInstalled":  true,
+      "screenInstalled":     true,
+      "secondLampInstalled": true,
+      "screenMoverDevice":   "CA.SMOV05",
+      "screenMoverType":     "NewFocusPicomotor",
+      "screenMoverFields": {
+        "setpoints": {
+          "in":    0,
+          "out": 10000
+        }
+      }
+    },
+
+    "CS.BTV0305": {
+      "digiCamDevice":       "CS.BTV0305.DigiCam",
+      "rotate": 0, "flip_hor": 0, "flip_ver": 0,
+      "controlDeviceName":   "CS.BTV0120_CS.BTV0305",
+      "controlDeviceType":   "BTVCTRL",
+      "controlDeviceFields": { "system": 2 },
+      "fixValueLamps":       false,
+      "filterInstalled":     true,
+      "firstLampInstalled":  true,
+      "screenInstalled":     true,
+      "secondLampInstalled": true,
+      "screenMoverDevice":   true,
+      "screenMoverType":     null,
+      "screenMoverFields":   null
+    },
+
+    "CS.BTV0420": {
+      "digiCamDevice":       "CS.BTV0420.DigiCam",
+      "rotate": 0, "flip_hor": 0, "flip_ver": 0,
+      "controlDeviceName":   "CS.BTV0420_CS.BTVVAC1",
+      "controlDeviceType":   "BTVCTRL",
+      "controlDeviceFields": { "system": 1 },
+      "fixValueLamps":       false,
+      "filterInstalled":     true,
+      "firstLampInstalled":  true,
+      "screenInstalled":     true,
+      "secondLampInstalled": true,
+      "screenMoverDevice":   true,
+      "screenMoverType":     null,
+      "screenMoverFields":   null
+    },
+
+    "CS.BTV0520": {
+      "digiCamDevice":       "CS.BTV0520.DigiCam",
+      "rotate": 0, "flip_hor": 0, "flip_ver": 0,
+      "controlDeviceName":   "CS.BTV0520_CS.BTV9999",
+      "controlDeviceType":   "BTVCTRL",
+      "controlDeviceFields": { "system": 1 },
+      "fixValueLamps":       false,
+      "filterInstalled":     true,
+      "firstLampInstalled":  true,
+      "screenInstalled":     true,
+      "secondLampInstalled": true,
+      "screenMoverDevice":   true,
+      "screenMoverType":     null,
+      "screenMoverFields":   null
+    },
+
+    "CS.BTVVAC1": {
+      "digiCamDevice":       "CS.BTVVAC1.DigiCam",
+      "rotate": 0, "flip_hor": 0, "flip_ver": 0,
+      "controlDeviceName":   "CS.BTV0420_CS.BTVVAC1",
+      "controlDeviceType":   "BTVCTRL",
+      "controlDeviceFields": { "system": 2 },
+      "fixValueLamps":       false,
+      "filterInstalled":     true,
+      "firstLampInstalled":  true,
+      "screenInstalled":     true,
+      "secondLampInstalled": true,
+      "screenMoverDevice":   null,
+      "screenMoverType":     null,
+      "screenMoverFields":   null
+    },
+
+    "CS.CAMVAC1": {
+      "digiCamDevice":       "CS.CAMVAC1.DigiCam",
+      "rotate": 0, "flip_hor": 0, "flip_ver": 0,
+      "controlDeviceName":   null,
+      "controlDeviceType":   null,
+      "controlDeviceFields": null, 
+      "fixValueLamps":       false,
+      "filterInstalled":     false,
+      "firstLampInstalled":  false,
+      "screenInstalled":     false,
+      "secondLampInstalled": false,
+      "screenMoverDevice":   null,
+      "screenMoverType":     null,
+      "screenMoverFields":   null
+    },
+
+    "CS.CAMAIR1": {
+      "digiCamDevice":       "CS.CAMAIR1.DigiCam",
+      "rotate": 0, "flip_hor": 0, "flip_ver": 0,
+      "controlDeviceName":   null,
+      "controlDeviceType":   null,
+      "controlDeviceFields": null, 
+      "fixValueLamps":       false,
+      "filterInstalled":     false,
+      "firstLampInstalled":  false,
+      "screenInstalled":     false,
+      "secondLampInstalled": false,
+      "screenMoverDevice":   "CA.AIR-TS.BOX1.XX",
+      "screenMoverType":     "BStepMotorVME",
+      "screenMoverFields": {
+        "setpoints": {
+          "out":    0,
+          "screen": -13000,
+          "old scat":  -33186,
+          "new scat":  -26586
+        }
+      }
+    },
+
+    "CS.CAMAIR2": {
+      "digiCamDevice":       "CS.CAMAIR2.DigiCam",
+      "rotate": 0, "flip_hor": 0, "flip_ver": 0,
+      "controlDeviceName":   null,
+      "controlDeviceType":   null,
+      "controlDeviceFields": null, 
+      "fixValueLamps":       false,
+      "filterInstalled":     false,
+      "firstLampInstalled":  false,
+      "screenInstalled":     false,
+      "secondLampInstalled": false,
+      "screenMoverDevice":   "CA.AIR-TS.BOX1.XX",
+      "screenMoverType":     "BStepMotorVME",
+      "screenMoverFields": {
+        "setpoints": {
+          "out":    0,
+          "screen": -13000,
+          "old scat":  -33186,
+          "new scat":  -26586
+        }
+      }
+    },
+
+    "CS.CAMAIR3": {
+      "digiCamDevice":       "CS.CAMAIR3.DigiCam",
+      "rotate": 0, "flip_hor": 0, "flip_ver": 0,
+      "controlDeviceName":   null,
+      "controlDeviceType":   null,
+      "controlDeviceFields": null, 
+      "fixValueLamps":       false,
+      "filterInstalled":     false,
+      "firstLampInstalled":  false,
+      "screenInstalled":     false,
+      "secondLampInstalled": false,
+      "screenMoverDevice":   "CA.AIR-TS.BOX1.XX",
+      "screenMoverType":     "BStepMotorVME",
+      "screenMoverFields": {
+        "setpoints": {
+          "out":    0,
+          "screen": -13000,
+          "old scat":  -33186,
+          "new scat":  -26586
+        }
+      }
+    },
+
+    "CS.CAMAIR4": {
+      "digiCamDevice":       "CS.CAMAIR4.DigiCam",
+      "rotate": 0, "flip_hor": 0, "flip_ver": 0,
+      "controlDeviceName":   null,
+      "controlDeviceType":   null,
+      "controlDeviceFields": null, 
+      "fixValueLamps":       false,
+      "filterInstalled":     false,
+      "firstLampInstalled":  false,
+      "screenInstalled":     false,
+      "secondLampInstalled": false,
+      "screenMoverDevice":   "CA.AIR-TS.BOX1.XX",
+      "screenMoverType":     "BStepMotorVME",
+      "screenMoverFields": {
+        "setpoints": {
+          "out":    0,
+          "screen": -13000,
+          "old scat":  -33186,
+          "new scat":  -26586
+        }
+      }
+    },
+
+
+
+    "PHIN.BTV01": {
+      "digiCamDevice":       "PHIN.BTV01.DigiCam",
+      "rotate": 0, "flip_hor": 0, "flip_ver": 0,
+      "controlDeviceName":   "PHIN.BTV01_PHIN.BTV.Spectro",
+      "controlDeviceType":   "BTVCTRL",
+      "controlDeviceFields": { "system": 1 },
+      "fixValueLamps":       false,
+      "filterInstalled":     false,
+      "firstLampInstalled":  true,
+      "screenInstalled":     true,
+      "secondLampInstalled": true,
+      "screenMoverDevice":   false,
+      "screenMoverType":     null,
+      "screenMoverFields":   null
+    },
+
+    "PHIN.BTV.Spectro": {
+      "digiCamDevice":       "PHIN.BTV.Spectro.DigiCam",
+      "rotate": 0, "flip_hor": 0, "flip_ver": 0,
+      "controlDeviceName":   "PHIN.BTV01_PHIN.BTV.Spectro",
+      "controlDeviceType":   "BTVCTRL",
+      "controlDeviceFields": { "system": 2 },
+      "fixValueLamps":       false,
+      "filterInstalled":     false,
+      "firstLampInstalled":  true,
+      "screenInstalled":     true,
+      "secondLampInstalled": true,
+      "screenMoverDevice":   false,
+      "screenMoverType":     null,
+      "screenMoverFields":   null
+    },
+
+
+    "PHIN.VCAT": {
+      "digiCamDevice":       "PHIN.VCAT.DigiCam",
+      "rotate": 0, "flip_hor": 0, "flip_ver": 0,
+      "controlDeviceName":   "PHIN.BTV01_PHIN.BTV.Spectro",
+      "controlDeviceType":   "BTVCTRL",
+      "controlDeviceFields": { "system": 2 },
+      "fixValueLamps":       false,
+      "filterInstalled":     false,
+      "firstLampInstalled":  true,
+      "screenInstalled":     true,
+      "secondLampInstalled": true,
+      "screenMoverDevice":   null,
+      "screenMoverType":     null,
+      "screenMoverFields":   null
+    }
+
+  }
+}

@@ -4,9 +4,7 @@ from datetime import datetime
 from Interfaces.AbstractMachineInterface import AbstractMachineInterface
 import RF_Track as rft
 import sys
-
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "FACET2"))
-
 import FACET2
 
 class InterfaceFACET2_Linac_RFTrack(AbstractMachineInterface):
@@ -32,11 +30,18 @@ class InterfaceFACET2_Linac_RFTrack(AbstractMachineInterface):
         self.nsamples = nsamples
         self.dfs_test_energy = 0.98
         self.wfs_test_charge = 0.90
+        self._beam_mode = "nominal"
         self.Q = -1
         self.__setup_beam0()
         self.__track_bunch()
         self._saved_sextupoles_state = None
         self.electronmass = rft.electronmass
+        self.machine_name = "FACET"
+        self.lattice.align_elements()
+        '''Uncomment lines below to scatter elements in the lattice.'''
+        # self.lattice.scatter_elements('bpm', 0.100, 0.100, 0, 0, 0, 0, 'center')
+        # self.lattice.scatter_elements('quadrupole', 0.100, 0.100, 0, 0, 0, 0, 'center')
+
 
     def log_messages(self,console):
         self.log=console or print
@@ -107,20 +112,24 @@ class InterfaceFACET2_Linac_RFTrack(AbstractMachineInterface):
     def change_energy(self):
         self.__setup_beam1()
         self.__track_bunch()
+        self._beam_mode = "energy_changed"
         dP_P = self.dfs_test_energy - 1.0
         return dP_P
 
     def reset_energy(self):
         self.__setup_beam0()
         self.__track_bunch()
+        self._beam_mode = "nominal"
 
     def change_intensity(self): #reduced charge
         self.__setup_beam2()
         self.__track_bunch()
+        self._beam_mode = "intensity_changed"
 
     def reset_intensity(self):
         self.__setup_beam0()
         self.__track_bunch()
+        self._beam_mode = "nominal"
 
     def get_sequence(self):
         return self.sequence
@@ -143,10 +152,10 @@ class InterfaceFACET2_Linac_RFTrack(AbstractMachineInterface):
         if isinstance(names, str):
             names = [names]
         if names is not None:
-            idx = np.array([i for i, s in enumerate(icts["names"]) if s in names])
+            idx = [i for i, s in enumerate(icts["names"]) if s in names]
             icts = {
-                "names": np.array(icts["names"])[idx],
-                "charge": np.array(icts["charge"])[idx],
+                "names": [icts["names"][i] for i in idx],
+                "charge": np.asarray(icts["charge"])[idx],
             }
         return icts
 
@@ -159,7 +168,7 @@ class InterfaceFACET2_Linac_RFTrack(AbstractMachineInterface):
             if not isinstance(elements, list):
                 elements = [elements]
 
-            k1_values = []
+            k1l_values = []
             for element in elements:
                 try:
                     strength = element.get_K1(self.Pref / self.Q)
@@ -167,22 +176,22 @@ class InterfaceFACET2_Linac_RFTrack(AbstractMachineInterface):
                     continue
                 if isinstance(strength, (list, tuple, np.ndarray)):
                     if len(strength) > 0:
-                        k1_values.append(float(strength[0]))
+                        k1l_values.append(float(strength[0]))
                 else:
-                    k1_values.append(float(strength))
+                    k1l_values.append(float(strength))
 
-            bdes[i] = k1_values[0] if k1_values else 0.0
+            bdes[i] = k1l_values[0] if k1l_values else 0.0
 
         quadrupoles = {"names": self.quadrupoles, "bdes": bdes, "bact": bdes.copy()}
 
         if isinstance(names, str):
             names = [names]
         if names is not None:
-            idx = np.array([i for i, s in enumerate(quadrupoles["names"]) if s in names])
+            idx = [i for i, s in enumerate(quadrupoles["names"]) if s in names]
             quadrupoles = {
-                "names": np.array(quadrupoles["names"])[idx],
-                "bdes": np.array(quadrupoles["bdes"])[idx],
-                "bact": np.array(quadrupoles["bact"])[idx],
+                "names": [quadrupoles["names"][i] for i in idx],
+                "bdes": np.asarray(quadrupoles["bdes"])[idx],
+                "bact": np.asarray(quadrupoles["bact"])[idx],
             }
 
         return quadrupoles
@@ -217,11 +226,11 @@ class InterfaceFACET2_Linac_RFTrack(AbstractMachineInterface):
         if isinstance(names, str):
             names = [names]
         if names is not None:
-            idx = np.array([i for i, s in enumerate(correctors["names"]) if s in names])
+            idx = [i for i, s in enumerate(correctors["names"]) if s in names]
             correctors = {
-                "names": np.array(correctors["names"])[idx],
-                "bdes": np.array(correctors["bdes"])[idx],
-                "bact": np.array(correctors["bact"])[idx],
+                "names": [correctors["names"][i] for i in idx],
+                "bdes": np.asarray(correctors["bdes"])[idx],
+                "bact": np.asarray(correctors["bact"])[idx],
             }
 
         return correctors
@@ -242,15 +251,34 @@ class InterfaceFACET2_Linac_RFTrack(AbstractMachineInterface):
         if isinstance(names, str):
             names = [names]
         if names is not None:
-            idx = np.array([i for i, s in enumerate(bpms["names"]) if s in names])
+            idx = [i for i, s in enumerate(bpms["names"]) if s in names]
             bpms = {
-                "names": np.array(bpms["names"])[idx],
-                "x": np.array(bpms["x"])[:, idx],
-                "y": np.array(bpms["y"])[:, idx],
-                "tmit": np.array(bpms["tmit"])[:, idx],
+                "names": [bpms["names"][i] for i in idx],
+                "x": np.asarray(bpms["x"])[:, idx],
+                "y": np.asarray(bpms["y"])[:, idx],
+                "tmit": np.asarray(bpms["tmit"])[:, idx],
             }
 
         return bpms
+
+    def _give_elements_to_show_beamline(self, quad_selected):
+        start_quad_element_name = quad_selected
+        return start_quad_element_name
+
+    def _get_elements_positions_show_beamline(self, names=None):
+        if isinstance(names, str):
+            names = [names]
+        all_names = []
+        all_s = []
+        for element in self.lattice['*']:
+            element_name = element.get_name()
+            if names is None or element_name in names:
+                all_names.append(element_name)
+                all_s.append(float(element.get_S("entrance")))
+        return {
+            "names": all_names,
+            "S": np.array(all_s, dtype=float),
+        }
 
     def get_screens(self, names=None):
         if isinstance(names, str):
@@ -262,18 +290,6 @@ class InterfaceFACET2_Linac_RFTrack(AbstractMachineInterface):
             screen for screen in self.screens
             if names is None or screen in names
         ]
-
-        s_positions = {}
-        s_pos = 0.0
-
-        for element in self.lattice['*']:
-            element_name = element.get_name()
-            if element_name in selected_screens:
-                s_positions[element_name] = s_pos
-            try:
-                s_pos += element.get_length()
-            except Exception:
-                pass
 
         hpixel_list = []
         vpixel_list = []
@@ -291,7 +307,7 @@ class InterfaceFACET2_Linac_RFTrack(AbstractMachineInterface):
         for screen_name in selected_screens:
             screen = self.lattice[screen_name]
             screen_names.append(screen_name)
-            s_list.append(s_positions.get(screen_name, np.nan))
+            s_list.append(float(screen.get_S("entrance")))
             hpixel_list.append(hpixel)
             vpixel_list.append(vpixel)
             bunch = screen.get_bunch()
@@ -384,61 +400,19 @@ class InterfaceFACET2_Linac_RFTrack(AbstractMachineInterface):
                 self.lattice[corr].vary_strength(0.0, val/10)  # T*mm
         self.__track_bunch()
 
-    def vary_quadrupoles(self, names, delta_values):
-        if not isinstance(names, list):
-            names = [names]
-        if not isinstance(delta_values, (list, tuple, np.ndarray)):
-            delta_values = [delta_values]
-        for quadrupole_name, val in zip(names, delta_values):
-            elements = self.lattice[quadrupole_name]
-            if not isinstance(elements, list):
-                elements = [elements]
-            current_values=[]
-            for element in elements:
-                current=element.get_K1(self.Pref / self.Q)
-                current=float(current[0]) if isinstance(current, (list, tuple,np.ndarray)) else float(current)
-                current_values.append(current)
-            if len(current_values)>1 and not np.allclose(current_values, current_values[0], rtol=0.0, atol=1e-12):
-                self.log(f"Parts of quadrupole {quadrupole_name} have different values")
-            target_value=(current_values[0] if len(current_values)>0 else 0.0) +float(val)
-            for element in elements:
-                element.set_K1(self.Pref / self.Q,target_value)
-
-        self.__track_bunch()
-
-    def align_everything(self):
-        self.lattice.align_elements()
-        self.__track_bunch()
-
-    def misalign_quadrupoles(self,sigma_x=0.100,sigma_y=0.100):
-        self.lattice.scatter_elements('quadrupole', sigma_x, sigma_y, 0, 0, 0, 0, 'center')
-        self.__track_bunch()
-
-    def misalign_bpms(self,sigma_x=0.100,sigma_y=0.100):
-        self.lattice.scatter_elements('bpm', sigma_x, sigma_y, 0, 0, 0, 0, 'center')
-        self.__track_bunch()
-
     def _get_elements_positions(self, names=None):
         if isinstance(names, str):
             names = [names]
         all_names = []
         all_s = []
         all_l = []
-        s_pos = 0.0
 
         for element in self.lattice['*']:
             element_name = element.get_name()
-            try:
-                element_length = float(element.get_length())
-            except Exception:
-                element_length = 0.0
-
             if names is None or element_name in names:
                 all_names.append(element_name)
-                all_s.append(s_pos)
-                all_l.append(element_length)
-
-            s_pos += element_length
+                all_s.append(float(element.get_S("entrance")))
+                all_l.append(float(element.get_length()))
 
         return {
             "names": all_names,
@@ -479,9 +453,9 @@ class InterfaceFACET2_Linac_RFTrack(AbstractMachineInterface):
         name_to_index = {string: index for index, string in enumerate(self.sequence)}
         return [name_to_index.get(name, np.nan) for name in names]
 
-    def predict_emittance_scan_response(self, quad_name, screens, K1_values, emit_x, emit_y, beta_x0, beta_y0, alpha_x0, alpha_y0, stop_checker=None, reference_screen=None):
+    def predict_emittance_scan_response(self, quad_name, screens, k1l_values, emit_x, emit_y, beta_x0, beta_y0, alpha_x0, alpha_y0, stop_checker=None, reference_screen=None):
         screens = list(screens)
-        K1_values = np.asarray(K1_values, dtype=float)
+        k1l_values = np.asarray(k1l_values, dtype=float)
 
         if len(screens) == 0:
             raise RuntimeError("No screens provided for emittance scan prediction.")
@@ -494,18 +468,18 @@ class InterfaceFACET2_Linac_RFTrack(AbstractMachineInterface):
         original_quad = self.get_quadrupoles(names=[quad_name])
         if len(original_quad["bdes"]) == 0:
             raise RuntimeError(f"Could not find original strength for quad {quad_name}")
-        K1_original = float(original_quad["bdes"][0])
+        K1L_original = float(original_quad["bdes"][0])
         B0_original = self.B0
 
-        output_x = np.full((len(K1_values), len(screens)), np.nan, dtype=float)
-        output_y = np.full((len(K1_values), len(screens)), np.nan, dtype=float)
+        output_x = np.full((len(k1l_values), len(screens)), np.nan, dtype=float)
+        output_y = np.full((len(k1l_values), len(screens)), np.nan, dtype=float)
 
         try:
-            for k, K1 in enumerate(K1_values):
+            for k, K1L in enumerate(k1l_values):
                 if callable(stop_checker) and stop_checker():
                     raise RuntimeError("__OPTIMIZATION_STOP__")
 
-                self.set_quadrupoles([quad_name], [float(K1)], track=False)
+                self.set_quadrupoles([quad_name], [float(K1L)], track=False)
                 self.B0 = self._build_bunch_from_guesses(
                     emit_x=emit_x,
                     emit_y=emit_y,
@@ -518,8 +492,7 @@ class InterfaceFACET2_Linac_RFTrack(AbstractMachineInterface):
                 output_x[k, :], output_y[k, :] = self._read_tracked_bunch_screen_sigmas(screens)
         finally:
             self.B0 = B0_original
-            self.set_quadrupoles([quad_name], [K1_original], track=False)
+            self.set_quadrupoles([quad_name], [K1L_original], track=False)
             self.__track_bunch()
 
         return output_x, output_y
-

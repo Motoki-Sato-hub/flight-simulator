@@ -1,75 +1,71 @@
-import sys, time, math, os
+from Interfaces.CLEAR.Setup_files.CLEAR_BPM_getHV import baseline_correct, find_peak, threshold_integral, plot_peak, plot_integral, change_inverted_bpm_polarity
+from Interfaces.CLEAR.InterfaceCLEAR_RFTrack import InterfaceCLEAR_RFTrack
+import sys, time, math, os, json
+from scipy.integrate import trapezoid
+from enum import Enum
+from scipy.optimize import curve_fit
 import numpy as np
-import pyjapc
+try:
+    import pyda
+    import pyda_japc
+except ImportError:
+    pyda = None
+    pyda_japc = None
 
 try:
     from Interfaces.CLEAR import config
-    try:
-        from Interfaces.CLEAR import clear_lattice
-    except Exception:
-        clear_lattice = None
 except ImportError:
     import config
-    try:
-        import clear_lattice
-    except Exception:
-        clear_lattice = None
 from Interfaces.AbstractMachineInterface import AbstractMachineInterface
+
+class BPMsMode(Enum):
+    peak = "peak"
+    baseline_peak = "baseline_peak"
+    integral = "integral"
+    integral_window = "integral_window"
+    integral_threshold = "integral_threshold"
+
+scaling_factors = {
+    "BPM0530": {"H": -0.403, "V": -0.396},
+    "BPM0595": {"H": -0.351, "V": -0.374},
+    "BPM0690": {"H": -0.400, "V": -0.410},
+    "BPM0820": {"H": -0.346, "V": -0.392},
+    "BPM0890": {"H": -0.391, "V": -0.417},
+}
 
 class CLEAR_real_machine(AbstractMachineInterface):
     def get_name(self):
         return 'CLEAR'
 
-    def __init__(self, nsamples=1, nominal_intensity=1.5, wfs_intensity=1.0):
+    def __init__(self, nsamples=3, bg_shots=10.0 ):
+        self.screen_backgrounds = {}
+        self.chosen_ict = "CA.BCMTHZ/Acquisition#charge"
+        self.steps_readback_position = 0.0
+        self.bpm_mode = BPMsMode.integral_threshold
         self.nsamples = nsamples
         self.electronmass = 0.51099895 # MeV/c^2
         self.Pref = 198 # MeV/c
+        self.machine_name = "CLEAR"
+        self.tracking_interface = InterfaceCLEAR_RFTrack()
         self.energy_param = [
             'CA.BEAM/Acquisition#momentum',
             'CA.BEAM/Acquisition#energy',
         ]
-        self.laser_attenuator_set_param = 'CA.GUN-ATTN/CMD#requestedPosition'
-        self.laser_attenuator_readback = [
-            'CA.GUN-ATTN/AQN#actualPosition',
-            'CA.GUN-ATTN/CMD#requestedPosition',
-        ]
-        self.laser_attenuator_min = 0.0
-        self.laser_attenuator_max = 3000.0
-        self.laser_motor_attenuator_set_param = 'CTF2Motor2B/Setting#targetPosition'
-        self.laser_motor_attenuator_readback = [
-            'CTF2Motor2B/Acquisition#position',
-            'CTF2Motor2B/Acquisition#actualPosition',
-            'CTF2Motor2B/Status#position',
-            'CTF2Motor2B/Setting#targetPosition',
-        ]
-
-        self.uv_attenuator_params = {
-            'UVATT1': 'CO.TOWB.101.UVATT1/Setting#position',
-            'UVATT2': 'CO.TOWB.102.UVATT2/Setting#position',
-        }
-        self.uv_attenuator_ranges = {
-            'UVATT1': (2017.0, 5526.0),
-            'UVATT2': (1549.0, 5159.0),
-        }
-        self.shutter_set_params = {
-            'UVBEAM1': 'CO.TOSL.101.UVBEAM1_Set_Pos/SettingBoolean#value',
-            'UVBEAM2': 'CO.TOSL.101.UVBEAM2_Set_Pos/SettingBoolean#value',
-        }
-        self.shutter_readback_params = {
-            'UVBEAM1': 'CO.TOSL.101.UVBEAM1_Acq_Pos/AcquisitionBoolean#value',
-            'UVBEAM2': 'CO.TOSL.101.UVBEAM2_Acq_Pos/AcquisitionBoolean#value',
-        }
-
+        self.is_simulation = False
+        self.context_acquisition = "SCT.USER.SETUP"
+        self.context_empty = ""
         self.log = print
-        self.japc = pyjapc.PyJapc("SCT.USER.ALL", incaAcceleratorName="CTF")
+        self.client = pyda.SimpleClient(provider=pyda_japc.JapcProvider())
+        self.rf_phase_nominal = 125 # degrees
+        self.rf_phase_test = 145 # degrees
 
         # Bpms and correctors in beamline order
         sequence = [
-            'CA.DHG0130', 'CA.DVG0130', 'CA.BPC0220',
-            'CA.DHG0225', 'CA.DVG0225', 'CA.BPC0240',
-            'CA.DHG0245', 'CA.DVG0245', 'CA.BPC0260',
-            'CA.DHG0265', 'CA.BPC0310',
-            'CA.DHG0320', 'CA.DVG0320', 'CA.SDV0340',
+            'CA.DHG0130', 'CA.DVG0130', #'CA.BPC0220',
+            'CA.DHG0225', 'CA.DVG0225', #'CA.BPC0240',
+            'CA.DHG0245', 'CA.DVG0245', #'CA.BPC0260',
+            'CA.DHG0265', #'CA.BPC0310',
+            'CA.DHG0320', 'CA.DVG0320', #'CA.SDV0340',
             'CA.QFD0350', 'CA.QDD0355', 'CA.QFD0360',
             'CA.DHG0385', 'CA.DVG0385',
             'CA.BTV0390L', 'CA.BTV0390H',
@@ -84,8 +80,9 @@ class CLEAR_real_machine(AbstractMachineInterface):
         ]
 
         monitors = [
-                     'CA.BPC0220', 'CA.BPC0240', 'CA.BPC0260',
-                     'CA.BPC0310', 'CA.BPM0530', 'CA.BPM0595',
+                     # 'CA.BPC0220', 'CA.BPC0240', 'CA.BPC0260',
+                     # 'CA.BPC0310',
+                    'CA.BPM0530', 'CA.BPM0595',
                      'CA.BPM0690', 'CA.BPM0820', 'CA.BPM0890',
         ]
 
@@ -93,27 +90,31 @@ class CLEAR_real_machine(AbstractMachineInterface):
             'CA.DHG0130', 'CA.DVG0130',
             'CA.DHG0225', 'CA.DVG0225',
             'CA.DHG0245', 'CA.DVG0245',
-            'CA.DHG0265',
+            'CA.DHG0265', 'CA.DVG0265',
             'CA.DHG0320', 'CA.DVG0320',
-            'CA.SDV0340',
             'CA.DHG0385', 'CA.DVG0385',
             'CA.DHJ0540', 'CA.DVJ0540',
             'CA.DHJ0590', 'CA.DVJ0590',
             'CA.DHJ0710', 'CA.DVJ0710',
             'CA.DHJ0780', 'CA.DVJ0780',
             'CA.DHJ0840', 'CA.DVJ0840',
+            # 'CA.SDV0340',
         ]
 
-        self.corrector_set_params = {name: f'{name}/SettingPPM#current' for name in correctors}
-        self.corrector_get_params = {name: f'{name}/Acquisition#currentAverage' for name in correctors}
+        self.screen_status_params = {
+            "CA.BTV0390L": "CA.BTV0390_CAS.BTV0420/OPSettingSystem1#positionChannel1",
+            "CA.BTV0390H": "CA.BTV0390_CAS.BTV0420/OPSettingSystem1#positionChannel1",
+            "CA.BTV0620":  "CAS.BTV0440_CA.BTV0620/OPSettingSystem2#positionChannel5",
+            "CA.BTV0730":  "CA.BTV0730_CA.BTV0800/OPSettingSystem1#positionChannel1",
+            "CA.BTV0810":  "CA.BTV0805_CA.BTV0810/OPSettingSystem2#positionChannel5",
+            "CA.BTV0910":  "CA.BTV0910_CAS.BTV0930/OPSettingSystem1#positionChannel1",
+        }
+
+        self.corrector_set_params = {name: f'{name}/SettingPPM' for name in correctors}
+        self.corrector_get_params = {name: f'{name}/Acquisition' for name in correctors}
 
         self.sextupoles = []
-        self.quadrupoles = [
-            'CA.QFD0350', 'CA.QDD0355', 'CA.QFD0360', 'CA.QFD0510',
-            'CA.QDD0515', 'CA.QFD0520', 'CA.QFD0760', 'CA.QDD0765',
-            'CA.QFD0770', 'CA.QDD0870', 'CA.QFD0880',
-        ]
-
+        self.quadrupoles = list(config.quad_names)
         monitors_from_sequence = [element for element in sequence if element in monitors]
         bpm_ok = all(bpm in monitors for bpm in monitors_from_sequence)
         if not bpm_ok:
@@ -129,8 +130,15 @@ class CLEAR_real_machine(AbstractMachineInterface):
         self.corrs = [element for element in self.sequence if element in correctors]
         self.screen_names = list(config.cameras.keys())
         self.screens = self.screen_names
-        self.screen_config = config.cameras
-        self.bpm_indexes = [index for index, string in enumerate(monitors) if string in self.bpms]
+        self.screen_config = config.cameras # it consists also screens that we should not use!
+
+        # ["CA.BTV0125","CA.BTV0215","CA.BTV0235", "CA.BTV0390", "CAS.BTV0420", "CAS.BTV0440", "CAS.CAMVESPER1",
+        #  "CA.BTV0545","CA.BTV0620", "CA.BTV0730","CA.BTV0800", "CA.BTV0805", "CA.BTV0810" , "CA.BTV0875",
+        #  "CA.BTV0910", "CAS.BTV0930","CA.CAMAIR1", "CA.CAMAIR2", "CA.CAMAIR3","CA.CAMAIR4", "CS.BTV0120", "CS.BTV0305",
+        #  "CS.BTV0420","CS.BTV0520", "CS.BTVVAC1","CS.CAMVAC1","CS.CAMAIR1","CS.CAMAIR2","CS.CAMAIR3","CS.CAMAIR4",
+        #  "PHIN.BTV01","PHIN.BTV.Spectro","PHIN.VCAT"]
+
+        self.bpm_indexes = [index for index, string in enumerate(sequence) if string in self.bpms]
 
         # Bunch current monitors
         self.ict_names = [
@@ -142,88 +150,77 @@ class CLEAR_real_machine(AbstractMachineInterface):
             'CA.BCMTHZ2/Acquisition#charge',
         ]
 
-        self.bcm_sample_params = {
-            "Gun_BCM": "CA.SABCM01/Samples#samples",
-            "Vesper_BCM": "CA.SABPMCAL-SIS5-2/Samples#samples",
-        }
-
-        self.bcm_gain_param = "CA.BCM01GAIN/Setting#enumValue"
-
-        self.bcm_sensitivity = {
-            "6dB": 2.085,
-            "12dB": 4.18,
-            "18dB": 8.35,
-            "20dB": 10.42,
-            "26dB1": 20.97,
-            "26dB2": 20.95,
-            "32dB": 41.9,
-            "40dB": 105.0,
-        }
-        self.nominal_laser_intensity = nominal_intensity
-        self.test_laser_intensity = wfs_intensity
         self.quadrupoles = list(config.quad_names)
         self.quad_set_params = dict(zip(config.quad_names, config.current_set_params))
         self.quad_get_params = dict(zip(config.quad_names, config.current_get_params))
         self.quad_status_params = dict(zip(config.quad_names, config.current_status_params))
+        self.cam_props = self.CamList() # Load camera configuration from assets/cameras.json
+        self.camList = list(self.cam_props.keys())
+        self.lattice = self.tracking_interface.lattice
+        self.start = self.tracking_interface.start
+        self.end = self.tracking_interface.end
+        self.bg_shots = int(bg_shots)
 
-        self.twiss_path = None
+    def CamList(self):
+        _JSON_PATH = os.path.join(os.path.dirname(__file__), 'cameras.json')
+        """Return the full device configuration dict (keyed by BTV device name)."""
+        with open(_JSON_PATH) as f:
+            data = json.load(f)
+        return data['devices']
+
+    def _get_charge_reference(self):
+        value = self.get_icts(names = self.chosen_ict)
+        return value["charge"]
+
+    def _give_elements_to_show_beamline(self, quad_selected):
+        start_quad_element_name = quad_selected
+        return start_quad_element_name
+
+    def _get_elements_positions_show_beamline(self, names=None):
+        if isinstance(names, str):
+            names = [names]
+        all_names = [name for name in self.tracking_interface.get_sequence() if names is None or name in names]
+
+        return {
+            "names": all_names,
+            "S": np.array([self._get_tracking_element(name).get_S("entrance") for name in all_names], dtype=float),
+        }
 
     def get_beam_factors(self):
         pref = self.Pref
-        for param in self.energy_param:
-            try:
-                value = self.japc.getParam(param)
-                value = self.make_safe_float(value, default=np.nan)
-                if np.isfinite(value) and value > 0:
-                    pref = value
-                    break
-            except Exception:
-                pass
+        # data = self.client.get("CA.BEAM/Acquisition").data
+        # for field in ("momentum", "energy"):
+        #     value = self.make_safe_float(data.get(field), default=np.nan)
+        #     if np.isfinite(value) and value > 0:
+        #         pref = value
+        #         break
+        pref = 195
         gamma_rel = np.sqrt((pref / self.electronmass) ** 2 + 1.0)
         beta_rel = np.sqrt(1.0 - 1.0 / gamma_rel ** 2)
-        return gamma_rel, beta_rel
-
-    def _read_twiss_file(self):
-        if self.twiss_path is None:
-            raise FileNotFoundError('No CLEAR twiss file configured')
-        with open(self.twiss_path, "r") as file:
-            lines = [line.strip() for line in file if line.strip()]
-        star_symbol = next(i for i, line in enumerate(lines) if line.startswith("*"))
-        dollar_sign = next(i for i, line in enumerate(lines) if line.startswith("$") and i > star_symbol)
-        columns = lines[star_symbol].lstrip("*").split()
-        return lines, columns, dollar_sign
+        beta_gamma = gamma_rel * beta_rel
+        return gamma_rel, beta_rel, beta_gamma
 
     def _get_twiss_s_positions(self, names):
-        names = list(names)
+        positions = []
+        for name in names:
+            element = self._get_tracking_element(name)
+            positions.append(float(element.get_S("exit")) if element is not None else np.nan)
+        return positions
 
-        if clear_lattice is not None and hasattr(clear_lattice, 'element_descriptions'):
-            s_pos = {}
-            for elem_name, elem_data in clear_lattice.element_descriptions.items():
-                if isinstance(elem_data, dict) and 's_center' in elem_data:
-                    s_pos[elem_name] = elem_data['s_center']
-            return [s_pos.get(name.rstrip('LH'), s_pos.get(name, np.nan)) for name in names]
-
-        if self.twiss_path is None:
-            return [np.nan] * len(names)
-
-        lines, columns, dollar_sign = self._read_twiss_file()
-        try:
-            name_column = columns.index("NAME")
-            s_column = columns.index("S")
-        except ValueError:
-            return [np.nan] * len(names)
-        s_pos = {}
-
-        for line in lines[dollar_sign + 1:]:
-            data = line.split()
-            if len(data) <= max(name_column, s_column):
-                continue
-            elem_name = data[name_column].strip('"')
+    def _get_tracking_element(self, name):
+        """Return the model element, including the BTV0390L/H machine aliases."""
+        candidates = (name, str(name).rstrip("LH"))
+        for candidate in dict.fromkeys(candidates):
             try:
-                s_pos[elem_name] = float(data[s_column])
-            except ValueError:
+                element = self.lattice[candidate]
+            except Exception:
                 continue
-        return [s_pos.get(name, np.nan) for name in names]
+            if isinstance(element, list):
+                if not element:
+                    continue
+                element = element[-1]
+            return element
+        return None
 
     @staticmethod
     def make_safe_float(value, default=np.nan):  # so even if japc address returns none, empty array or whatever, interface still works
@@ -237,94 +234,67 @@ class CLEAR_real_machine(AbstractMachineInterface):
         except Exception:
             return float(default)
 
-    def _valid_japc_value(self, param_names, default=np.nan):
-        for param_name in param_names:
-            try:
-                value = self.japc.getParam(param_name)
-            except Exception:
-                continue
-            value = self.make_safe_float(value, default=np.nan)
-            if np.isfinite(value):
-                return value
-        return float(default)
-
     def change_energy(self):
-        self.log('Function change_energy needs implementation.')
-        return 0.0
+        energy_readback = self.client.get('CK.LL-MKS11/Setting').data['PhaseSh_SP'] # changes value globally
+        self.log(f"Value before changing energy: {energy_readback}")
+        new_energy = self.rf_phase_test
+        self.client.set('CK.LL-MKS11/Setting', data = {"PhaseSh_SP" : new_energy})
+        self.log(f"Value after changing energy: {new_energy}")
+        self._wait_for_japc_readback('CK.LL-MKS11/Setting', 'PhaseSh_SP', new_energy)
+        after_energy_change = self.client.get('CK.LL-MKS11/Setting').data['PhaseSh_SP']
+        print(after_energy_change)
+        return after_energy_change
 
     def reset_energy(self):
-        self.log('Function reset_energy needs implementation.')
-
-    def _intensity_to_attenuator_position(self, value):
-        value = float(value)
-        if 0.0 <= value <= 1.0:
-            value = self.laser_attenuator_min + value * (self.laser_attenuator_max - self.laser_attenuator_min)
-        return float(np.clip(value, self.laser_attenuator_min, self.laser_attenuator_max))
-
-    def get_laser_attenuator_position(self):
-        value = self._valid_japc_value(self.laser_attenuator_readback, default=np.nan)
-        return value / 1e3 if np.isfinite(value) else np.nan
-
-    def set_laser_attenuator_position(self, position):
-        position = self._intensity_to_attenuator_position(position)
-        command_position = position * 1e3
-        self.log(f'Setting CLEAR gun attenuator to {position:.3f} ksteps ({command_position:.0f} steps)...')
-        self.japc.setParam(self.laser_attenuator_set_param, float(command_position))
-        time.sleep(1)
-        return position
-
-    def get_laser_motor_attenuator_position(self):
-        return self._valid_japc_value(self.laser_motor_attenuator_readback, default=np.nan)
-
-    def set_laser_motor_attenuator_position(self, position):
-        position = float(np.clip(float(position), 0.0, 3000.0))
-        self.log(f'Setting CLEAR motor attenuator to {position:.1f} steps...')
-        self.japc.setParam(self.laser_motor_attenuator_set_param, position)
-        time.sleep(1)
-        return position
-
-    def set_uv_attenuator_position(self, attenuator_name, position):
-        if attenuator_name not in self.uv_attenuator_params:
-            raise ValueError(f'Unknown UV attenuator {attenuator_name}. Expected one of {list(self.uv_attenuator_params)}')
-        min_pos, max_pos = self.uv_attenuator_ranges.get(attenuator_name, (-np.inf, np.inf))
-        position = float(np.clip(float(position), min_pos, max_pos))
-        self.log(f'Setting {attenuator_name} to {position:.1f}...')
-        self.japc.setParam(self.uv_attenuator_params[attenuator_name], position)
-        time.sleep(1)
-        return position
-
-    def set_uv_attenuator_percent(self, attenuator_name, percent):
-        if attenuator_name not in self.uv_attenuator_ranges:
-            raise ValueError(f'Unknown UV attenuator {attenuator_name}. Expected one of {list(self.uv_attenuator_ranges)}')
-        min_pos, max_pos = self.uv_attenuator_ranges[attenuator_name]
-        percent = float(np.clip(float(percent), 0.0, 100.0))
-        position = min_pos + (max_pos - min_pos) * percent / 100.0
-        return self.set_uv_attenuator_position(attenuator_name, position)
-
-    def set_shutter(self, shutter_name, open_shutter=True):
-        if shutter_name not in self.shutter_set_params:
-            raise ValueError(f'Unknown shutter {shutter_name}. Expected one of {list(self.shutter_set_params)}')
-        self.japc.setParam(self.shutter_set_params[shutter_name], bool(open_shutter))
-        time.sleep(0.5)
-        return bool(open_shutter)
-
-    def get_shutter(self, shutter_name):
-        if shutter_name not in self.shutter_readback_params:
-            raise ValueError(f'Unknown shutter {shutter_name}. Expected one of {list(self.shutter_readback_params)}')
-        value = self._valid_japc_value([self.shutter_readback_params[shutter_name]], default=np.nan)
-        if not np.isfinite(value):
-            return np.nan
-        return bool(value)
+        print(f"Resetting energy to {self.rf_phase_nominal}...")
+        self.client.set('CK.LL-MKS11/Setting', data = {"PhaseSh_SP" : self.rf_phase_nominal})
+        self._wait_for_japc_readback('CK.LL-MKS11/Setting', 'PhaseSh_SP', self.rf_phase_nominal)
+        print(f"Energy has been reset to {self.rf_phase_nominal}...")
+        after_energy_reset = self.client.get('CK.LL-MKS11/Setting').data['PhaseSh_SP']
+        print(after_energy_reset)
 
     def change_intensity(self):
-        target_position = self.set_laser_attenuator_position(self.test_laser_intensity)
-        self.log(f'CLEAR test intensity set through gun attenuator: {target_position:.3f} ksteps')
+        self.steps_readback_position = self.client.get('CO.TOWB.102.UVATT2/Setting').data['position']
+        self.steps_readback_position_min = self.client.get('CO.TOWB.102.UVATT2/Setting').data['position_min']
+        self.steps_readback_position_max =self.client.get('CO.TOWB.102.UVATT2/Setting').data['position_max']
+        print(f'Changing intensity to ...')
+        nominal_settings_steps = self.steps_readback_position
+        N_steps = 1000 # to be verified!
+        new_laser_settings = nominal_settings_steps + N_steps
+        self.log(f"The new laser settings will be set to {new_laser_settings}... Nominal value is {self.steps_readback_position}.")
+        self.client.set('CO.TOWB.102.UVATT2/Setting', data={"position": new_laser_settings})
+        self._wait_for_japc_readback('CO.TOWB.102.UVATT2/Setting', 'position', new_laser_settings)
+        self.log(f"The new laser settings has been set to {new_laser_settings}. Nominal value was {self.steps_readback_position}.")
+        after_intensity_change = self.client.get('CO.TOWB.102.UVATT2/Setting').data['position']
+        self.log(f"Read after change of intensity:", after_intensity_change)
         return self
 
     def reset_intensity(self):
-        target_position = self.set_laser_attenuator_position(self.nominal_laser_intensity)
-        self.log(f'CLEAR nominal intensity restored through gun attenuator: {target_position:.3f} ksteps')
-        return self
+        print(f"Resetting intensity to {self.steps_readback_position}...")
+        self.client.set('CO.TOWB.102.UVATT2/Setting', data = {"position" : self.steps_readback_position})
+        self._wait_for_japc_readback('CO.TOWB.102.UVATT2/Setting', 'position', self.steps_readback_position)
+        print(f"Intensity steps has been reset to {self.steps_readback_position}...")
+        after_intensity_reset = self.client.get('CO.TOWB.102.UVATT2/Setting').data['position']
+        self.log(f"Read after reset of intensity:", after_intensity_reset)
+
+    def get_beam_settings(self):
+        settings = {"energy": {}, "intensity": {}}
+        settings["energy"]["mks11_phase"] = self.make_safe_float(self.client.get('CK.LL-MKS11/Setting').data['PhaseSh_SP'])
+        settings["intensity"]["uvatt2_position"] = self.make_safe_float(self.client.get('CO.TOWB.102.UVATT2/Setting').data['position'])
+        return settings
+
+    def restore_beam_settings(self, settings):
+        settings = settings or {}
+        phase = self.make_safe_float(settings.get("energy", {}).get("mks11_phase"))
+        if np.isfinite(phase):
+            self.client.set('CK.LL-MKS11/Setting', data={"PhaseSh_SP": phase})
+            self._wait_for_japc_readback('CK.LL-MKS11/Setting', 'PhaseSh_SP', phase)
+
+        position = self.make_safe_float(settings.get("intensity", {}).get("uvatt2_position"))
+        if np.isfinite(position):
+            self.client.set('CO.TOWB.102.UVATT2/Setting', data={"position": position})
+            self._wait_for_japc_readback('CO.TOWB.102.UVATT2/Setting', 'position', position)
+        return True
 
     def get_sequence(self):
         return self.sequence
@@ -341,380 +311,205 @@ class CLEAR_real_machine(AbstractMachineInterface):
         name_to_index = {string: index for index, string in enumerate(self.sequence)}
         return [name_to_index.get(name, np.nan) for name in names]
 
-    def log_messages(self, console):
-        self.log = console or print
-
-    def _read_screen_setting(self, screen_name):
-        japc_camera = self.screen_config.get(screen_name, {}).get('japc_name', screen_name.rstrip('LH'))
-        try:
-            self.japc.setSelector('')
-            return self.japc.getParam(f'{japc_camera}.DigiCam/Setting')
-        except Exception:
-            return None
-
-    def _read_screen_h_matrix(self, screen_name):
-        japc_camera = self.screen_config.get(screen_name, {}).get('japc_name', screen_name.rstrip('LH'))
-        try:
-            self.japc.setSelector('')
-            return self.japc.getParam(f'{japc_camera}Settings/Settings#h_matrix')
-        except Exception:
-            return None
-
     def _read_screen_status(self, screen_name):
-        japc_camera = self.screen_config.get(screen_name, {}).get('japc_name', screen_name.rstrip('LH'))
-        candidates = [
-            f'{japc_camera}/Acquisition#screenIn',
-            f'{japc_camera}/Status#screenIn',
-            f'{japc_camera}/Status#position',
-        ]
-        return self._valid_japc_value(candidates, default=np.nan)
-
-    def _acquire_screen_image(self, screen_name):
-        japc_camera = self.screen_config.get(screen_name, {}).get('japc_name', screen_name.rstrip('LH'))
-        camera_config = self.screen_config.get(screen_name, {})
-        selector = camera_config.get('japc_selector', '')
         try:
-            self.japc.setSelector(selector)
-            try:
-                image = self.japc.getParam(f'{japc_camera}.DigiCam/LastImage#image2D')
-            except Exception:
-                try:
-                    image = self.japc.getParam(f'{japc_camera}.DigiCam/ExtractionImage')
-                except Exception:
-                    image = self.japc.getParam(f'{japc_camera}/Image')
+            address = self.screen_status_params[screen_name]
+            property_address, field = address.rsplit("#", 1)
+            value = self.client.get(property_address, context=self.context_empty).data[field]
+            return self.make_safe_float(value)
         except Exception as exc:
-            self.log(f'Could not read image from {screen_name}: {exc}')
-            return None
-        if image is None:
-            return None
-        image = np.asarray(image, dtype=float)
-        if image.size == 0:
-            return None
-        return image
-
-    def set_screen_camera_on(self, screen_name, on=True):
-        japc_camera = self.screen_config.get(screen_name, {}).get('japc_name', screen_name.rstrip('LH'))
-        self.japc.setParam(f'{japc_camera}/Setting#cameraSwitch', int(bool(on)))
-
-    def set_screen_filter(self, screen_name, filter_value):
-        japc_camera = self.screen_config.get(screen_name, {}).get('japc_name', screen_name.rstrip('LH'))
-        self.japc.setParam(f'{japc_camera}/Setting#filterSelect', filter_value)
-
-    def set_screen_video_gain(self, screen_name, gain_value):
-        japc_camera = self.screen_config.get(screen_name, {}).get('japc_name', screen_name.rstrip('LH'))
-        self.japc.setParam(f'{japc_camera}/Setting#videoGain', gain_value)
-
-    def set_screen_select(self, screen_name, screen_value):
-        japc_camera = self.screen_config.get(screen_name, {}).get('japc_name', screen_name.rstrip('LH'))
-        self.japc.setParam(f'{japc_camera}/Setting#screenSelect', screen_value)
-
-    @staticmethod
-    def _roi_from_setting(setting, image_shape):
-        if setting is None:
-            return np.array([0, image_shape[1], 0, image_shape[0]], dtype=int)
-        try:
-            if setting.get('imageROIEnable'):
-                x0, y0, dx, dy = setting['imageROI']
-                return np.array([x0, x0 + dx, y0, y0 + dy], dtype=int)
-            _, _, width, height = setting['imageWindow']
-            return np.array([0, width, 0, height], dtype=int)
-        except Exception:
-            return np.array([0, image_shape[1], 0, image_shape[0]], dtype=int)
-
-    @staticmethod
-    def _auto_aoi_from_image(image, threshold_fraction=0.2, margin=20):
-        img = np.asarray(image, dtype=float)
-        if img.size == 0 or not np.any(np.isfinite(img)):
-            return None
-
-        work = img.copy()
-        work[~np.isfinite(work)] = 0.0
-        work = work - np.nanmin(work)
-        peak = np.nanmax(work)
-        if not np.isfinite(peak) or peak <= 0:
-            return None
-
-        mask = work >= threshold_fraction * peak
-        ys, xs = np.where(mask)
-        if xs.size == 0 or ys.size == 0:
-            return None
-
-        ny, nx = work.shape
-        x0 = max(0, int(xs.min()) - margin)
-        x1 = min(nx, int(xs.max()) + margin + 1)
-        y0 = max(0, int(ys.min()) - margin)
-        y1 = min(ny, int(ys.max()) + margin + 1)
-        return x0, x1, y0, y1
-
-    @staticmethod
-    def _screen_data_from_image(image, hpixel, vpixel):
-        if image is None:
-            return np.nan, np.nan, np.nan, np.nan, 0.0, np.zeros((1, 1)), np.array([0.0, 1.0]), np.array([0.0, 1.0])
-
-        img = np.asarray(image, dtype=float).copy()
-        img[~np.isfinite(img)] = 0.0
-        img = img - np.nanmin(img)
-        total = float(np.sum(img))
-        ny, nx = img.shape
-
-        if total <= 0.0 or nx == 0 or ny == 0:
-            hedges = np.arange(nx + 1, dtype=float) * (hpixel if np.isfinite(hpixel) and hpixel > 0 else 1.0)
-            vedges = np.arange(ny + 1, dtype=float) * (vpixel if np.isfinite(vpixel) and vpixel > 0 else 1.0)
-            return np.nan, np.nan, np.nan, np.nan, 0.0, img, hedges, vedges
-
-        if not np.isfinite(hpixel) or hpixel <= 0:
-            hpixel = 1.0
-        if not np.isfinite(vpixel) or vpixel <= 0:
-            vpixel = 1.0
-
-        x_centers = (np.arange(nx, dtype=float) - 0.5 * (nx - 1)) * hpixel
-        y_centers = (np.arange(ny, dtype=float) - 0.5 * (ny - 1)) * vpixel
-
-        proj_x = np.sum(img, axis=0)
-        proj_y = np.sum(img, axis=1)
-
-        x_mean = float(np.sum(x_centers * proj_x) / total)
-        y_mean = float(np.sum(y_centers * proj_y) / total)
-        sigx = float(np.sqrt(max(np.sum(((x_centers - x_mean) ** 2) * proj_x) / total, 0.0)))
-        sigy = float(np.sqrt(max(np.sum(((y_centers - y_mean) ** 2) * proj_y) / total, 0.0)))
-
-        hedges = (np.arange(nx + 1, dtype=float) - 0.5 * nx) * hpixel
-        vedges = (np.arange(ny + 1, dtype=float) - 0.5 * ny) * vpixel
-        return x_mean, y_mean, sigx, sigy, total, img, hedges, vedges
-
-    def _read_bcm_scope(self, scope_name):
-        try:
-            data = self.japc.getParam(f"{scope_name}/Acquisition")
-            signal = np.asarray(data["value"], dtype=float) * data["sensitivity"] + data["offset"]
-            return float(np.mean(signal[20:60]))
-        except Exception:
+            self.log(f"Could not read screen status for {screen_name}: {exc}")
             return np.nan
 
-    def _read_bpm_plane(self, bpm, plane):
-        plane = plane.lower()
-        candidates = [
-            f'{bpm}/Acquisition#{plane}',
-            f'{bpm}/Acquisition#{plane}Position',
-            f'{bpm}/Acquisition#{plane}position',
-            f'{bpm}/Acquisition#position{plane.upper()}',
-            f'{bpm}/Acquisition#pos{plane.upper()}',
-        ]
-        return self._valid_japc_value(candidates, default=np.nan)
+    @staticmethod
+    def _camera_frame_id(camera_data):
+        timestamp = float(np.asarray(camera_data["imageTimeStamp"]).ravel()[0])
+        image = np.asarray(camera_data["image2D"])
+        return ("image", image.shape, image.dtype.str, hash(image.tobytes()))
 
-    def _read_bpm_intensity(self, bpm):
-        candidates = [
-            f'{bpm}/Acquisition#intensity',
-            f'{bpm}/Acquisition#sum',
-            f'{bpm}/Acquisition#charge',
-        ]
-        value = self._valid_japc_value(candidates, default=np.nan)
-        return value if np.isfinite(value) else 1.0
+    def _acquire_screen_data(self, screen_name, previous_frame_id=None, timeout=5.0):
+        japc_camera = self.screen_config.get(screen_name, {}).get("japc_name", screen_name.rstrip("LH"))
+        camera_config = self.screen_config.get(screen_name, {})
+        selector = camera_config.get("japc_selector", self.context_empty)
+        deadline = time.perf_counter() + timeout
+        while time.perf_counter() < deadline:
+            camera_data = self.client.get(f"{japc_camera}.DigiCam/LastImage", context=selector).data
+            if previous_frame_id is None or self._camera_frame_id(camera_data) != previous_frame_id:
+                return camera_data
+            time.sleep(0.1)
+        self.log(f"No new camera frame for {screen_name} within {timeout:.1f} s.")
+        return None
 
-    def get_screens(self, names=None):
-        self.log('Reading screens...')
+    def _get_screen_pixel_calibration(self, screen_name):
+        camera_config = self.screen_config.get(screen_name, {})
+        japc_camera = camera_config.get("japc_name", screen_name.rstrip("LH"))
+        selector = camera_config.get("japc_selector", self.context_empty)
+        calibration = self.client.get(f"{japc_camera}.DigiCam/CalibrationSetting", context=selector).data
+        hpixel = self.make_safe_float(calibration.get("pixelCalSet1"))
+        vpixel = self.make_safe_float(calibration.get("pixelCalSet2"))
+        return hpixel, vpixel
 
-        if isinstance(names, str):
-            names = [names]
-        selected_names = self.screen_names if names is None else [name for name in self.screen_names if name in names]
-
-        s_positions = self._get_twiss_s_positions(selected_names)
-
-        hpixel_list = []
-        vpixel_list = []
-        xb_list = []
-        yb_list = []
-        sigx_list = []
-        sigy_list = []
-        sum_list = []
-        images = []
-        hedges_all = []
-        vedges_all = []
-        inout_list = []
-
-        for screen_name in selected_names:
-            camera_config = self.screen_config.get(screen_name, {})
-            hpixel = float(camera_config.get('s_x_res', np.nan))
-            vpixel = float(camera_config.get('s_y_res', np.nan))
-
-            status = self._read_screen_status(screen_name)
-            setting = self._read_screen_setting(screen_name)
-            image = self._acquire_screen_image(screen_name)
-            if image is not None:
-                roi = self._roi_from_setting(setting, image.shape)
-                x0, x1, y0, y1 = roi
-                x0 = max(0, min(int(x0), image.shape[1]))
-                x1 = max(x0, min(int(x1), image.shape[1]))
-                y0 = max(0, min(int(y0), image.shape[0]))
-                y1 = max(y0, min(int(y1), image.shape[0]))
-                image = image[y0:y1, x0:x1]
-
-                auto_roi = self._auto_aoi_from_image(image)
-                if auto_roi is not None:
-                    ax0, ax1, ay0, ay1 = auto_roi
-                    image = image[ay0:ay1, ax0:ax1]
-
-            x_mean, y_mean, sigx, sigy, total, image, hedges, vedges = self._screen_data_from_image(image, hpixel, vpixel)
-
-            hpixel_list.append(hpixel)
-            vpixel_list.append(vpixel)
-            xb_list.append(x_mean)
-            yb_list.append(y_mean)
-            sigx_list.append(sigx)
-            sigy_list.append(sigy)
-            sum_list.append(total)
-            images.append(image)
-            hedges_all.append(hedges)
-            vedges_all.append(vedges)
-            inout_list.append(status)
-
-        return {
-            "names": np.asarray(selected_names),
-            "hpixel": np.asarray(hpixel_list, dtype=float),
-            "vpixel": np.asarray(vpixel_list, dtype=float),
-            "x": np.asarray(xb_list, dtype=float),
-            "y": np.asarray(yb_list, dtype=float),
-            "sigx": np.asarray(sigx_list, dtype=float),
-            "sigy": np.asarray(sigy_list, dtype=float),
-            "sum": np.asarray(sum_list, dtype=float),
-            "hedges": hedges_all,
-            "vedges": vedges_all,
-            "images": images,
-            "S": np.asarray(s_positions, dtype=float),
-            "inout": np.asarray(inout_list, dtype=float),
-        }
-
-
-    def get_target_dispersion(self, names=None):
-        if names is None:
-            names = self.bpms
-        if isinstance(names, str):
-            names = [names]
-
-        if self.twiss_path is None:
-            return [np.nan] * len(names), [np.nan] * len(names)
-
-        lines, columns, dollar_sign = self._read_twiss_file()
-        try:
-            dx_column = columns.index('DX')
-            dy_column = columns.index('DY')
-            name_column = columns.index('NAME')
-        except ValueError:
-            return [np.nan] * len(names), [np.nan] * len(names)
-
-        disp_values = {}
-        for line in lines[dollar_sign + 1:]:
-            data = line.split()
-            if len(data) <= max(dx_column, dy_column, name_column):
-                continue
-            elem_name = data[name_column].strip('"')
-            try:
-                disp_values[elem_name] = (float(data[dx_column]), float(data[dy_column]))
-            except ValueError:
-                continue
-
-        target_disp_x, target_disp_y = [], []
-        for bpm in names:
-            dx, dy = disp_values.get(bpm, (np.nan, np.nan))
-            target_disp_x.append(dx)
-            target_disp_y.append(dy)
-        return target_disp_x, target_disp_y
-
-    def _read_bcm_charge(self, bcm_name):
-        try:
-            samples = self.japc.getParam(self.bcm_sample_params[bcm_name])
-            gain = self.japc.getParam(self.bcm_gain_param)
-
-            samples = np.asarray(samples, dtype=float) / 1000.0
-            waveform = samples.reshape(samples.shape[0], -1)[0] if samples.ndim > 1 else samples
-
-            voltage = float(np.mean(waveform[4000:8000])) * 2.13
-            sensitivity = self.bcm_sensitivity.get(str(gain), np.nan)
-
-            return 10.0 * voltage / sensitivity
-        except Exception:
-            return np.nan
+    def _orient_screen_image(self, screen_name, image, hpixel, vpixel):
+        camera_config = self.screen_config.get(screen_name, {})
+        japc_camera = camera_config.get("japc_name", screen_name.rstrip("LH"))
+        camera_properties = self.cam_props.get(japc_camera, {})
+        oriented = np.asarray(image, dtype=float)
+        if camera_properties.get("flip_hor", 0): oriented = np.fliplr(oriented)
+        if camera_properties.get("flip_ver", 0): oriented = np.flipud(oriented)
+        rotate = int(camera_properties.get("rotate", 0)) % 4
+        if rotate:
+            oriented = np.rot90(oriented, rotate)
+            if rotate % 2:
+                hpixel, vpixel = vpixel, hpixel
+        return oriented, hpixel, vpixel
 
     def get_icts(self, names=None):
+        #BCM_THZ = ('CA.BCMTHZ/Acquisition#charge', 'SCT.USER.SETUP')
         self.log("Reading ict's...")
-
         if names is None:
             names = self.ict_names
         if isinstance(names, str):
             names = [names]
-
         charge = []
         for name in names:
-            if name in self.bcm_sample_params:
-                charge.append(self._read_bcm_charge(name))
-            else:
-                charge.append(self._valid_japc_value([name], default=np.nan))
-
+            property_address, field = name.rsplit("#", 1)
+            try:
+                value = self.client.get(property_address, context=self.context_acquisition).data[field]
+            except Exception:
+                value = np.nan
+            charge.append(self.make_safe_float(value))
         return {
-            "names": np.asarray(names),
+            "names": list(names),
             "charge": np.asarray(charge, dtype=float),
         }
 
     def get_correctors(self, names=None):
+        #{corr_name}/SettingPPM#current
         self.log("Reading correctors' strengths...")
         selected_names = self.corrs if names is None else ([names] if isinstance(names, str) else list(names))
 
         bdes, bact = [], []
         for corrector in selected_names:
-            bdes.append(self._valid_japc_value([self.corrector_set_params[corrector]], default=np.nan))
-            bact.append(self._valid_japc_value([self.corrector_get_params[corrector]], default=np.nan))
+            setting_data = self.client.get(self.corrector_set_params[corrector],context = self.context_empty).data
+            acquisition_data = self.client.get(self.corrector_get_params[corrector], context = self.context_acquisition).data
+            bdes.append(setting_data['current'])
+            bact.append(acquisition_data['currentAverage'])
 
         return {
-            "names": np.asarray(selected_names),
+            "names": list(selected_names),
             "bdes": np.asarray(bdes, dtype=float),
             "bact": np.asarray(bact, dtype=float),
         }
 
     def get_bpms(self, names=None):
+        window = (260, 360)
         self.log('Reading bpms...')
         selected_names = self.bpms if names is None else ([names] if isinstance(names, str) else list(names))
-
         x, y, tmit = [], [], []
+        mode = self.bpm_mode
         for sample in range(self.nsamples):
             self.log(f'Sample = {sample}')
             x_sample, y_sample, tmit_sample = [], [], []
             for bpm in selected_names:
-                x_sample.append(self._read_bpm_plane(bpm, 'x'))
-                y_sample.append(self._read_bpm_plane(bpm, 'y'))
-                tmit_sample.append(self._read_bpm_intensity(bpm))
+                hsamples = self.client.get(f"{bpm}H-SA/SamplesFromTrigger", context = self.context_acquisition).data
+                vsamples = self.client.get(f"{bpm}V-SA/SamplesFromTrigger", context=self.context_acquisition).data
+                ssamples = self.client.get(f"{bpm}S-SA/SamplesFromTrigger", context=self.context_acquisition).data
+
+                H_samples = change_inverted_bpm_polarity(np.asarray(hsamples["samples"], dtype=float).ravel(), bpm)
+                V_samples = change_inverted_bpm_polarity(np.asarray(vsamples["samples"], dtype=float).ravel(), bpm)
+                S_samples = np.asarray(ssamples["samples"], dtype=float).ravel()
+
+                H_b_samples = baseline_correct(H_samples)
+                V_b_samples = baseline_correct(V_samples)
+                S_b_samples = baseline_correct(S_samples)
+
+                s_sum = np.sum(S_samples[320:330])
+
+                if mode == BPMsMode.peak: # Find peak (largest magnitude, keeping the sign)
+                    H, H_idx = find_peak(H_samples)
+                    V, V_idx = find_peak(V_samples)
+                    # plot_peak([H_samples, V_samples], [H_idx, V_idx], [H, V], ["H", "V"], BPM)
+
+                elif mode == BPMsMode.baseline_peak: # Find peak on baseline corrected signal (largest magnitude, keeping the sign)
+                    H, H_idx = find_peak(H_b_samples)
+                    V, V_idx = find_peak(V_b_samples)
+                    # plot_peak([H_b_samples, V_b_samples], [H_idx, V_idx], [H, V], ["H", "V"], BPM, )
+
+                elif mode == BPMsMode.integral: # Integration of full BPM signal with baseline correction
+                    H = trapezoid(H_b_samples)
+                    V = trapezoid(V_b_samples)
+                    # plot_integral(signals=[H_b_samples, V_b_samples], integrals=[H, V], labels=["H", "V"], BPM=BPM)
+
+                elif mode == BPMsMode.integral_window: # Integration of fixed window BPM signal with baseline correction
+                    window_start, window_end = window
+                    H = trapezoid(H_b_samples[window_start:window_end])
+                    V = trapezoid(V_b_samples[window_start:window_end])
+                    # plot_integral(signals=[H_b_samples, V_b_samples], integrals=[H, V], labels=["H", "V"], BPM=BPM, starts=[window_start, window_start], ends=[window_end, window_end], )
+
+                elif mode == BPMsMode.integral_threshold: # Integration between 5% of the peak threshold region with baseline correction
+                    H, H_start, H_end, H_peak_idx = threshold_integral(H_b_samples)
+                    V, V_start, V_end, V_peak_idx = threshold_integral(V_b_samples)
+                    S, S_start, S_end, S_peak_idx = threshold_integral(S_b_samples)
+                    bpm_key = bpm[3:] if bpm.startswith("CA.") else bpm
+
+                    H = (H / S) / scaling_factors[bpm_key]["H"]
+                    V = (V / S) / scaling_factors[bpm_key]["V"]
+
+                else:
+                    raise ValueError(
+                        f"Unknown mode '{mode}'. " "Choose from: 'peak', 'baseline_peak', " "'integral', 'integral_window', 'integral_threshold'.")
+
+                x_sample.append(H)
+                y_sample.append(V)
+                tmit_sample.append(s_sum)
             x.append(x_sample)
             y.append(y_sample)
             tmit.append(tmit_sample)
             time.sleep(1)
 
         return {
-            "names": np.asarray(selected_names),
+            "names": list(selected_names),
             "x": np.asarray(x, dtype=float),
             "y": np.asarray(y, dtype=float),
             "tmit": np.asarray(tmit, dtype=float),
         }
 
+    def _wait_for_japc_readback(self, property_address, field, target, *, context=None, tolerance=5e-3, timeout=10.0):
+        def read_value():
+            data = self.client.get(property_address, context=context).data
+            return self.make_safe_float(data.get(field), default=np.nan)
+        return self._wait_for_readback(read_value, target, description=f"{property_address}#{field}", tolerance=tolerance, timeout=timeout)
 
-    def _wait_for_corrector_readback(self, corrector, target, tolerance=1e-4, timeout=1.0, poll_interval=0.05):
-        readback_param = self.corrector_get_params[corrector]
-        t0 = time.perf_counter()
-        last_value = np.nan
+    def _wait_for_corrector_readbacks(self, names, targets, tolerance=5e-3, timeout=10.0, poll_interval=0.05):
+        targets = {name: float(target) for name, target in zip(names, targets)}
+        pending = set(targets)
+        last_values = {name: np.nan for name in targets}
+        deadline = time.perf_counter() + timeout
 
-        while time.perf_counter() - t0 < timeout:
-            try:
-                last_value = self.make_safe_float(self.japc.getParam(readback_param), default=np.nan)
-            except Exception:
-                last_value = np.nan
+        while pending and time.perf_counter() < deadline:
+            for corrector in tuple(pending):
+                try:
+                    data = self.client.get(self.corrector_get_params[corrector], context=self.context_acquisition).data
+                    value = self.make_safe_float(data.get("currentAverage"))
+                except Exception:
+                    value = np.nan
+                last_values[corrector] = value
+                if np.isfinite(value) and abs(value - targets[corrector]) <= tolerance:
+                    pending.remove(corrector)
+            if pending:
+                time.sleep(poll_interval)
 
-            if np.isfinite(last_value) and abs(last_value - float(target)) <= tolerance:
-                return True
+        for corrector in pending:
+            self.log(
+                f"Warning: {corrector} did not reach target {targets[corrector]:.6g} "
+                f"within {timeout:.2f}s. Last readback = {last_values[corrector]:.6g}"
+            )
+        return not pending
 
-            time.sleep(poll_interval)
-
-        self.log(
-            f'Warning: {readback_param} did not reach target {float(target):.6g} '
-            f'within {timeout:.2f}s. Last readback = {last_value:.6g}'
-        )
-        return False
+    def _wait_for_quadrupole_readback(self, quadrupole, target, tolerance=5e-3, timeout=10.0):
+        readback_param = self.quad_get_params[quadrupole]
+        property_address, field = readback_param.rsplit("#", 1)
+        return self._wait_for_japc_readback(property_address, field, target, context=self.context_acquisition, tolerance=tolerance, timeout=timeout)
 
     def set_correctors(self, names, corr_vals):
         if isinstance(names, str):
@@ -725,9 +520,8 @@ class CLEAR_real_machine(AbstractMachineInterface):
             self.log('Error: len(names) != len(corr_vals) in set_correctors(names, corr_vals)')
             return
         for corrector, corr_val in zip(names, corr_vals):
-            target = float(corr_val)
-            self.japc.setParam(self.corrector_set_params[corrector], target)
-            self._wait_for_corrector_readback(corrector, target)
+            self.client.set(self.corrector_set_params[corrector], data={'current': corr_val})
+        return self._wait_for_corrector_readbacks(names, corr_vals)
 
     def vary_correctors(self, names, corr_vals):
         if isinstance(names, str):
@@ -747,25 +541,353 @@ class CLEAR_real_machine(AbstractMachineInterface):
         if isinstance(names, str):
             names = [names]
 
-        bdes, bact = [], []
+        ides = []
+        iact = []
 
         for quadrupole in names:
-            bdes.append(self._valid_japc_value([self.quad_set_params[quadrupole]], default=np.nan))
-            bact.append(self._valid_japc_value([self.quad_get_params[quadrupole]], default=np.nan))
+            set_address = self.quad_set_params[quadrupole]
+            set_property, set_field = set_address.rsplit("#", 1)
+
+            get_address = self.quad_get_params[quadrupole]
+            get_property, get_field = get_address.rsplit("#", 1)
+
+            try:
+                set_value = self.client.get(set_property, context=self.context_empty).data[set_field]
+            except Exception:
+                set_value = np.nan
+            try:
+                get_value = self.client.get(get_property, context=self.context_acquisition).data[get_field]
+            except Exception:
+                get_value = np.nan
+
+            ides.append(self.make_safe_float(set_value))
+            iact.append(self.make_safe_float(get_value))
+
+        ides = np.asarray(ides, dtype=float)
+        iact = np.asarray(iact, dtype=float)
+        try:
+            bdes = np.asarray([self.current_to_k1l(name, current) for name, current in zip(names, ides)], dtype=float)
+            bact = np.asarray([self.current_to_k1l(name, current) for name, current in zip(names, iact)], dtype=float)
+            self.update_tracking_model_with_japc_readback(names=names, nominal_bdes_value=bdes, nominal_bact_value=bact)
+
+        except Exception as exc:
+            self.log(f"CLEAR current-to-K1L conversion failed for {names}: {exc}")
+            bdes = np.full(len(names), np.nan, dtype=float)
+            bact = np.full(len(names), np.nan, dtype=float)
 
         return {
-            "names": np.array(names),
-            "bdes": np.array(bdes, dtype=float),
-            "bact": np.array(bact, dtype=float),
+            "names": list(names),
+            "bdes": bdes,
+            "bact": bact,
+            "ides": ides,
+            "iact": iact,
         }
 
-    def set_quadrupoles(self, names, values):
+    def set_quadrupoles(self, names, k1l_values):
         if isinstance(names, str):
             names = [names]
-        if not isinstance(values, (list, tuple, np.ndarray)):
-            values = [values]
+        if not isinstance(k1l_values, (list, tuple, np.ndarray)):
+            k1l_values = [k1l_values]
+        if len(names) != len(k1l_values):
+            raise ValueError(f"len(names)={len(names)} != len(k1l_values)={len(k1l_values)}")
 
-        for quadrupole, value in zip(names, values):
-            self.japc.setParam(self.quad_set_params[quadrupole], float(value))
+        for quadrupole, k1l in zip(names, k1l_values):
+            current_A = self.k1l_to_current(quadrupole, k1l)
+            address = self.quad_set_params[quadrupole]
+            property_address, field = address.rsplit("#", 1)
+            self.client.set(property_address, data={field: current_A})
+            self._wait_for_quadrupole_readback(quadrupole, current_A)
 
-        time.sleep(1)
+    def _get_screen_movement_info(self, screen_name):
+        btv_key = screen_name.rstrip("LH")
+        cam = self.cam_props.get(btv_key)
+        if cam is None: raise RuntimeError(f"Camera {btv_key} not found")
+        if not bool(cam.get("screenInstalled")): raise RuntimeError(f"Camera {btv_key} not installed")
+
+        screen_props = {
+            "btv_key": btv_key,
+            "btvdevice": cam.get('controlDeviceName'),  # None when not configured
+            "ctrl_type" : cam.get('controlDeviceType'),
+            "ctrl_fields" : cam.get('controlDeviceFields', {}),
+            "screen_mover_device" : cam.get('screenMoverDevice'), # None for most cameras
+            "screen_mover_type" : cam.get('screenMoverType'),
+            "screen_mover_fields" : cam.get('screenMoverFields') or {}
+        }
+
+        screen_props["system"] = int(screen_props["ctrl_fields"].get("system", 1))
+        screen_props["has_custom_screen_mover"] = isinstance(screen_props["screen_mover_device"], str)
+
+        if screen_props["system"] == 1:
+            screen_props["set_prop"] = 'OPSettingSystem1'
+            screen_props["get_prop"] = 'ExpertSettingDCSystem1'
+            screen_props["get_set_field"] = 'positionChannel1'
+            screen_props["description_field"] = 'dcm1DriverNames'
+
+        elif screen_props["system"] == 2:
+            screen_props["set_prop"] = 'OPSettingSystem2'
+            screen_props["get_prop"] = 'ExpertSettingDCSystem2'
+            screen_props["get_set_field"] = 'positionChannel5'
+            screen_props["description_field"] = 'dcm3DriverNames'
+
+        else:
+            screen_props["set_prop"] = screen_props["get_prop"] = screen_props["field"] = screen_props["description_field"] = None
+
+        return screen_props
+
+    def insert_screen(self, screen_name):
+        info = self._get_screen_movement_info(screen_name)
+        current_screen_inout_status = self.client.get(f"{info['btvdevice']}/{info['set_prop']}").data[info['get_set_field']] # 0 or not == 0 means screen is out, whatever else means IN
+        if current_screen_inout_status.value == 0:
+            self.log(f"Inserting {screen_name}...")
+            self.client.set(f"{info['btvdevice']}/{info['set_prop']}", data={f"{info['get_set_field']}": 1}) # 1, meaning INSERT the screen
+            reached_target = self._wait_for_screen_target_position(screen_name, 1)
+            if not reached_target: raise RuntimeError(f"Screen {screen_name} was not inserted within time.")
+            self.log(f"Inserted {screen_name}!")
+            current_screen_inout_status2 = self.client.get(f"{info['btvdevice']}/{info['set_prop']}").data[info['get_set_field']]
+            print("Current Screen Inout Status:", current_screen_inout_status2)
+        else:
+            print(current_screen_inout_status.value)
+            self.log(f"Screen {screen_name} already inserted")
+            return
+            return
+
+    def extract_screen(self, screen_name):
+        screen_name = screen_name.rstrip("LH")
+        info = self._get_screen_movement_info(screen_name)
+        current_screen_inout_status = self.client.get(f"{info['btvdevice']}/{info['set_prop']}").data[info['get_set_field']]  # 0 or not == 0 means screen is out, whatever else means IN
+        if current_screen_inout_status.value == 0:
+            self.log(f"Screen {screen_name} already extracted")
+            return
+        else:
+            self.log(f"Extracting {screen_name}...")
+            self.client.set(f"{info['btvdevice']}/{info['set_prop']}", data={f"{info['get_set_field']}": 0})  # 0, meaning EXTRACT the screen
+            reached_target = self._wait_for_screen_target_position(screen_name, 0)
+            if not reached_target: raise RuntimeError(f"Screen {screen_name} was not extracted within time.")
+            self.log(f"Extracted {screen_name}!")
+
+    def acquire_screen_background(self, screen_name, frames = None):
+        if frames is None: frames = self.bg_shots
+        previous_data = self._acquire_screen_data(screen_name)
+        previous_frame_id = self._camera_frame_id(previous_data) if previous_data is not None else None
+        self.extract_screen(screen_name)
+        background_frames = []
+        for frame in range(frames):
+            self.log(f"Acquiring {frame}/{frames} background frames...")
+            camera_data = self._acquire_screen_data(screen_name, previous_frame_id)
+            if camera_data is None:
+                continue
+            previous_frame_id = self._camera_frame_id(camera_data)
+            image = np.asarray(camera_data['image2D'], dtype=float)
+            background_frames.append(image)
+            self.log(f"Acquired {frame}/{frames} background frames...")
+            # camgui.bgAction samples its background frames at 100 ms intervals.
+            time.sleep(0.1)
+        if not background_frames:
+            raise RuntimeError(f"No background frames available for {screen_name}")
+        self.log(f"Acquired {frames} background frames. Calculating the mean...")
+        bg_img = np.mean(np.stack(background_frames, axis=0), axis=0)
+        self.log(f"Mean calculated.")
+        self.screen_backgrounds[screen_name] = bg_img
+        return bg_img
+
+    def _wait_for_screen_target_position(self, screen_name, target, timeout=10.0, poll_interval=0.05):
+        info = self._get_screen_movement_info(screen_name)
+        t0 = time.perf_counter()
+        while time.perf_counter() - t0 < timeout:
+            current_screen_inout_status = self.client.get(f"{info['btvdevice']}/{info['set_prop']}").data[info['get_set_field']]  # 0 or not == 0 means screen is out, whatever else means IN
+            if current_screen_inout_status.value == 0 and target==0: return True
+            if current_screen_inout_status.value > 0 and target >0: return True
+            time.sleep(poll_interval)
+        self.log(
+            f'Warning: {screen_name} did not reach target state = {target:.6g} '
+            f'within {timeout:.2f}s. Last readback = {current_screen_inout_status.value:.6g}'
+        )
+        return False
+
+    def acquire_screen_image(self, screen_name):
+        previous_data = self._acquire_screen_data(screen_name)
+        previous_frame_id = self._camera_frame_id(previous_data) if previous_data is not None else None
+        self.insert_screen(screen_name)
+        camera_data = self._acquire_screen_data(screen_name, previous_frame_id)
+        if camera_data is None: raise RuntimeError(f"No camera data available for {screen_name}")
+        beam_img = np.asarray(camera_data['image2D'], dtype=float)
+        bg_img = self.screen_backgrounds[screen_name]
+        subtracted_img = beam_img - bg_img
+        subtracted_img[~np.isfinite(subtracted_img)] = 0.0
+        return subtracted_img, bg_img.copy(), beam_img
+
+    def get_screens(self, names=None):
+        background_images, beam_images = [], []
+        self.log(f'Reading screens {names}...')
+        if isinstance(names, str):
+            names = [names]
+        selected_names = self.screen_names if names is None else [name for name in self.screen_names if name in names]
+        s_positions = self._get_twiss_s_positions(selected_names)
+        hpixel_list = []
+        vpixel_list = []
+        xb_list = []
+        yb_list = []
+        sigx_list = []
+        sigy_list = []
+        sum_list = []
+        images = []
+        hedges_all = []
+        vedges_all = []
+        inout_list = []
+
+        for screen_name in selected_names:
+            raw_hpixel, raw_vpixel = self._get_screen_pixel_calibration(screen_name)
+            hpixel, vpixel = raw_hpixel, raw_vpixel
+
+            for attempt in range(3):  # re-acquire the image if the Gaussian fit came back as a nan
+                try:
+                    if screen_name not in self.screen_backgrounds:
+                        self.log(f"Acquiring background image for {screen_name}.")
+                        self.acquire_screen_background(screen_name, frames = 10)
+                    subtracted_img, bg_img, beam_img = self.acquire_screen_image(screen_name)
+                    subtracted_img, hpixel, vpixel = self._orient_screen_image(screen_name, subtracted_img, raw_hpixel, raw_vpixel)
+                    bg_img, _, _ = self._orient_screen_image(screen_name, bg_img, raw_hpixel, raw_vpixel)
+                    beam_img, _, _ = self._orient_screen_image(screen_name, beam_img, raw_hpixel, raw_vpixel)
+                    x_mean, y_mean, sigx, sigy, total, img, hedges, vedges = self._screen_data_from_image(subtracted_img, hpixel, vpixel)
+                    if np.isfinite(sigx) and np.isfinite(sigy):
+                        break
+
+                except Exception as e:
+                    x_mean = np.nan
+                    y_mean = np.nan
+                    sigx = np.nan
+                    sigy = np.nan
+                    total = 0.0
+                    subtracted_img = np.zeros((1, 1), dtype=float)
+                    bg_img = np.zeros((1, 1), dtype=float)
+                    beam_img = np.zeros((1, 1), dtype=float)
+                    hedges = np.array([0.0, 1.0], dtype=float)
+                    vedges = np.array([0.0, 1.0], dtype=float)
+
+            status = self._read_screen_status(screen_name) # is screen inserted or extracted?
+            hpixel_list.append(hpixel)
+            vpixel_list.append(vpixel)
+            xb_list.append(x_mean)
+            yb_list.append(y_mean)
+            sigx_list.append(sigx)
+            sigy_list.append(sigy)
+            sum_list.append(total)
+            images.append(np.asarray(subtracted_img, dtype=float))
+            background_images.append(np.asarray(bg_img, dtype=float))
+            beam_images.append(np.asarray(beam_img, dtype=float))
+            hedges_all.append(np.asarray(hedges, dtype=float))
+            vedges_all.append(np.asarray(vedges, dtype=float))
+            inout_list.append(status)
+
+        screens = {
+            "names": list(selected_names),
+            "hpixel": np.asarray(hpixel_list, dtype=float), # mm
+            "vpixel": np.asarray(vpixel_list, dtype=float), # mm
+            "x": np.asarray(xb_list, dtype=float),
+            "y": np.asarray(yb_list, dtype=float),
+            "sigx": np.asarray(sigx_list, dtype=float),
+            "sigy": np.asarray(sigy_list, dtype=float),
+            "sum": np.asarray(sum_list, dtype=float),
+            "hedges": hedges_all, #imagePositionSet1
+            "vedges": vedges_all,
+            "background_images": background_images,
+            "beam_images": beam_images,
+            "images": images, # subtracted images
+            "S": np.asarray(s_positions, dtype=float),
+            "inout": np.asarray(inout_list, dtype=float),
+        }
+
+        return screens
+
+    @staticmethod
+    def _quad_sign(name):
+        if "QFD" in name:
+            return 1.0
+        if "QDD" in name:
+            return -1.0
+        raise ValueError(f"Unknown interface quadrupole: {name}")
+
+    def current_to_k1l(self, name, current_A, pref_mev_c=None):
+        current_A = float(current_A)
+        pref_mev_c = self.tracking_interface.Pref if pref_mev_c is None else float(pref_mev_c)
+        if not np.isfinite(current_A) or not np.isfinite(pref_mev_c) or pref_mev_c <= 0:
+            return np.nan
+
+        length = float(self._get_tracking_element(name).get_length())
+        k1 = self.tracking_interface.get_Quad_K_from_I(current_A, length, pref_mev_c)
+        return self._quad_sign(name) * k1 * length
+
+    def k1l_to_current(self, name, k1l, pref_mev_c=None):
+        k1l = float(k1l)
+        pref_mev_c = self.tracking_interface.Pref if pref_mev_c is None else float(pref_mev_c)
+        if not np.isfinite(k1l) or not np.isfinite(pref_mev_c) or pref_mev_c <= 0:
+            raise ValueError(f"Invalid K1L or reference momentum for {name}")
+        a = float(self.tracking_interface.get_ITF(0.0))
+        b = float(a - self.tracking_interface.get_ITF(1.0))
+        target = self._quad_sign(name) * k1l * pref_mev_c / 299.8
+        discriminant = a * a - 4.0 * b * target
+        if discriminant < 0.0:
+            raise ValueError(f"K1L={k1l:.6g} is outside the CLEAR calibration range for {name}")
+        solutions = ((a - np.sqrt(discriminant)) / (2.0 * b),
+                 (a + np.sqrt(discriminant)) / (2.0 * b))
+        return float(min(solutions, key=abs))
+
+    def update_tracking_model_with_japc_readback(self, nominal_bdes_value=None, nominal_bact_value=None, names=None):
+        if isinstance(names, str):
+            names = [names]
+        bact = np.asarray(nominal_bact_value, dtype=float)
+        self.tracking_interface.set_quadrupoles(names, bact)
+
+    def predict_emittance_scan_response(self, *args, **kwargs):
+        return self.tracking_interface.predict_emittance_scan_response(*args, **kwargs)
+
+    def get_R_matrix_scan(self, *args, **kwargs):
+        return self.tracking_interface.get_R_matrix_scan(*args, **kwargs)
+
+    def get_phase_space_transport_to_screens(self, *args, **kwargs):
+        return self.tracking_interface.get_phase_space_transport_to_screens(*args, **kwargs)
+
+    def get_twiss_evolution(self, *args, **kwargs):
+        return self.tracking_interface.get_twiss_evolution(*args, **kwargs)
+
+    @staticmethod
+    def _gaussian(x, amplitude, center, sigma, offset):
+        return amplitude * np.exp(-((x - center) ** 2) / (2.0 * sigma ** 2)) + offset
+
+    @classmethod
+    def _fit_projection(cls, axis, projection):
+        baseline_subtracted = projection - np.min(projection)
+        normalisation = baseline_subtracted.sum()
+        centre = baseline_subtracted.dot(axis) / normalisation
+        rms = np.sqrt(baseline_subtracted.dot((axis - centre) ** 2) / normalisation)
+        fitted, _ = curve_fit(cls._gaussian, axis, projection, p0=[np.max(projection) - np.min(projection), centre, rms, np.min(projection)]) # [amplitude, center, sigma, background]
+        return fitted[1], abs(fitted[2]) # sigx, sigy
+
+    def _screen_data_from_image(self, image, hpixel, vpixel): # better be subtracted!
+        img = np.flipud(np.asarray(image, dtype=float).copy())
+        img[~np.isfinite(img)] = 0.0
+        ny, nx = img.shape # e.g. ny = no. of rows, nx = no. of columns
+        x_pixels_positions = hpixel * np.linspace(-nx / 2, nx / 2, nx)
+        y_pixels_positions = vpixel * np.linspace(-ny / 2, ny / 2, ny)
+        summed_intensity = np.sum(img)
+        proj_x = np.mean(img, axis=0)
+        proj_y = np.mean(img, axis=1)
+
+        x_mean_positions, sigx = self._fit_projection(x_pixels_positions, proj_x)
+        y_mean_positions, sigy = self._fit_projection(y_pixels_positions, proj_y)
+
+        hedges = np.r_[x_pixels_positions - hpixel / 2, x_pixels_positions[-1] + hpixel / 2]
+        vedges = np.r_[y_pixels_positions - vpixel / 2, y_pixels_positions[-1] + vpixel / 2]
+
+        return x_mean_positions, y_mean_positions, sigx, sigy, summed_intensity, img, hedges, vedges
+
+    def log_messages(self, console):
+        self.log = console or print
+
+    def _read_screen_setting(self, screen_name):
+        japc_camera = self.screen_config.get(screen_name, {}).get('japc_name', screen_name.rstrip('LH'))
+        try:
+            return self.client.get(f'{japc_camera}.DigiCam/Setting', context = self.context_empty).data
+        except Exception as e:
+            print(e)
+            return None

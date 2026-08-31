@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>1295</width>
-    <height>819</height>
+    <width>1512</width>
+    <height>930</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -33,14 +33,23 @@
           <string>Response Matrices</string>
          </attribute>
          <layout class="QVBoxLayout" name="verticalLayout_7">
+          <property name="spacing">
+           <number>1</number>
+          </property>
           <item>
            <widget class="QGroupBox" name="session_group_3">
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="Preferred" vsizetype="Maximum">
+              <horstretch>0</horstretch>
+              <verstretch>0</verstretch>
+             </sizepolicy>
+            </property>
             <property name="styleSheet">
              <string notr="true">QGroupBox#session_group_3 {
     background-color: rgb(245, 245, 245);
     border: 1px solid rgb(210, 210, 210);
     border-radius: 6px;
-    margin-top: 8px;
+    margin-top: 4px;
     padding-top: 6px;
 }
 QGroupBox#session_group_3::title {
@@ -103,13 +112,94 @@ QGroupBox#session_group_3::title {
            </widget>
           </item>
           <item>
+           <widget class="QGroupBox" name="restore_machine_status_group">
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="Preferred" vsizetype="Maximum">
+              <horstretch>0</horstretch>
+              <verstretch>0</verstretch>
+             </sizepolicy>
+            </property>
+            <property name="styleSheet">
+             <string notr="true">QGroupBox#restore_machine_status_group {
+    background-color: rgb(245, 245, 245);
+    border: 1px solid rgb(210, 210, 210);
+    border-radius: 6px;
+    margin-top: 4px;
+    padding-top: 6px;
+}
+QGroupBox#restore_machine_status_group::title {
+    subcontrol-origin: margin;
+    left: 10px;
+    padding: 0 4px 0 4px;
+}</string>
+            </property>
+            <property name="title">
+             <string>Restore machine status from file</string>
+            </property>
+            <layout class="QVBoxLayout" name="restore_machine_status_layout">
+             <property name="leftMargin">
+              <number>4</number>
+             </property>
+             <property name="topMargin">
+              <number>4</number>
+             </property>
+             <property name="rightMargin">
+              <number>4</number>
+             </property>
+             <property name="bottomMargin">
+              <number>4</number>
+             </property>
+             <item>
+              <layout class="QHBoxLayout" name="restore_machine_status_file_layout">
+               <item>
+                <widget class="QLabel" name="restore_machine_status_label">
+                 <property name="text">
+                  <string>Machine status</string>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <widget class="QLineEdit" name="machine_status_file">
+                 <property name="maximumSize">
+                  <size>
+                   <width>500</width>
+                   <height>16777215</height>
+                  </size>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <widget class="QPushButton" name="restore_machine_status_button">
+                 <property name="sizePolicy">
+                  <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+                   <horstretch>0</horstretch>
+                   <verstretch>0</verstretch>
+                  </sizepolicy>
+                 </property>
+                 <property name="text">
+                  <string>...</string>
+                 </property>
+                </widget>
+               </item>
+              </layout>
+             </item>
+            </layout>
+           </widget>
+          </item>
+          <item>
            <widget class="QGroupBox" name="trajectory_group_3">
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="Preferred" vsizetype="Maximum">
+              <horstretch>0</horstretch>
+              <verstretch>0</verstretch>
+             </sizepolicy>
+            </property>
             <property name="styleSheet">
              <string notr="true">QGroupBox#trajectory_group_3 {
     background-color: rgb(245, 245, 245);
     border: 1px solid rgb(210, 210, 210);
     border-radius: 6px;
-    margin-top: 8px;
+    margin-top: 4px;
     padding-top: 6px;
 }
 QGroupBox#trajectory_group_3::title {
@@ -173,12 +263,18 @@ QGroupBox#trajectory_group_3::title {
           </item>
           <item>
            <widget class="QGroupBox" name="groupBox_6">
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="Preferred" vsizetype="Maximum">
+              <horstretch>0</horstretch>
+              <verstretch>0</verstretch>
+             </sizepolicy>
+            </property>
             <property name="styleSheet">
              <string notr="true">QGroupBox#groupBox_6 {
     background-color: rgb(245, 245, 245);
     border: 1px solid rgb(210, 210, 210);
     border-radius: 6px;
-    margin-top: 8px;
+    margin-top: 4px;
     padding-top: 6px;
 }
 QGroupBox#groupBox_6::title {
@@ -246,12 +342,18 @@ QGroupBox#groupBox_6::title {
           </item>
           <item>
            <widget class="QGroupBox" name="groupBox_7">
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="Preferred" vsizetype="Maximum">
+              <horstretch>0</horstretch>
+              <verstretch>0</verstretch>
+             </sizepolicy>
+            </property>
             <property name="styleSheet">
              <string notr="true">QGroupBox#groupBox_7 {
     background-color: rgb(245, 245, 245);
     border: 1px solid rgb(210, 210, 210);
     border-radius: 6px;
-    margin-top: 8px;
+    margin-top: 4px;
     padding-top: 6px;
 }
 QGroupBox#groupBox_7::title {
@@ -315,6 +417,12 @@ QGroupBox#groupBox_7::title {
           </item>
           <item>
            <widget class="QGroupBox" name="groupBox_9">
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="Preferred" vsizetype="Fixed">
+              <horstretch>0</horstretch>
+              <verstretch>0</verstretch>
+             </sizepolicy>
+            </property>
             <property name="styleSheet">
              <string notr="true">QGroupBox#groupBox_9 {
     background-color: rgb(245, 245, 245);
@@ -333,12 +441,71 @@ QGroupBox#groupBox_9::title {
              <string>Computation</string>
             </property>
             <layout class="QVBoxLayout" name="verticalLayout_2">
-             <item alignment="Qt::AlignHCenter">
-              <widget class="QCheckBox" name="triangular_checkbox">
-               <property name="text">
-                <string>Force triangular matrix</string>
-               </property>
-              </widget>
+             <item>
+              <layout class="QHBoxLayout" name="actuator_mode_layout">
+               <item>
+                <spacer name="actuator_mode_left_spacer">
+                 <property name="orientation">
+                  <enum>Qt::Horizontal</enum>
+                 </property>
+                 <property name="sizeType">
+                  <enum>QSizePolicy::Expanding</enum>
+                 </property>
+                 <property name="sizeHint" stdset="0">
+                  <size>
+                   <width>40</width>
+                   <height>20</height>
+                  </size>
+                 </property>
+                </spacer>
+               </item>
+               <item>
+                <widget class="QLabel" name="actuator_mode_label">
+                 <property name="text">
+                  <string>Actuator type</string>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <widget class="QComboBox" name="actuator_mode_combo">
+                 <property name="minimumSize">
+                  <size>
+                   <width>160</width>
+                   <height>0</height>
+                  </size>
+                 </property>
+                 <property name="toolTip">
+                  <string>&lt;html&gt;&lt;body&gt;&lt;p&gt;Select which devices are used as BBA actuators.&lt;/p&gt;&lt;p&gt;Correctors use steering magnets. Quadrupole movers mode uses quadrupole mover offsets, if supported by the selected interface.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+                 </property>
+                 <item>
+                  <property name="text">
+                   <string>Correctors</string>
+                  </property>
+                 </item>
+                 <item>
+                  <property name="text">
+                   <string>Quadrupole movers</string>
+                  </property>
+                 </item>
+                </widget>
+               </item>
+               <item>
+                <spacer name="actuator_mode_right_spacer">
+                 <property name="orientation">
+                  <enum>Qt::Horizontal</enum>
+                 </property>
+                 <property name="sizeType">
+                  <enum>QSizePolicy::Expanding</enum>
+                 </property>
+                 <property name="sizeHint" stdset="0">
+                  <size>
+                   <width>40</width>
+                   <height>20</height>
+                  </size>
+                 </property>
+                </spacer>
+               </item>
+              </layout>
              </item>
             </layout>
            </widget>
@@ -348,10 +515,13 @@ QGroupBox#groupBox_9::title {
             <property name="orientation">
              <enum>Qt::Vertical</enum>
             </property>
+            <property name="sizeType">
+             <enum>QSizePolicy::Maximum</enum>
+            </property>
             <property name="sizeHint" stdset="0">
              <size>
               <width>20</width>
-              <height>40</height>
+              <height>300</height>
              </size>
             </property>
            </spacer>
@@ -853,6 +1023,31 @@ QGroupBox#groupBox::title {
                        </property>
                       </widget>
                      </item>
+                     <item>
+                      <widget class="QToolButton" name="orbit_weight_tooltip">
+                       <property name="toolTip">
+                        <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Weight of the orbit residual in the correction. &lt;/p&gt;&lt;p&gt;Higher value makes the algorithm prioritize matching the reference orbit, which is the initial, sarting orbit. &lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+                       </property>
+                       <property name="styleSheet">
+                        <string notr="true">QToolButton#orbit_weight_tooltip {
+    border: 1px solid #888;
+    border-radius: 10px;
+    min-width: 20px;
+    max-width: 20px;
+    min-height: 20px;
+    max-height: 20px;
+    padding: 0px;
+    font-weight: bold;
+}
+QToolButton#orbit_weight_tooltip:hover {
+    background-color: #e6e6e6;
+}</string>
+                       </property>
+                       <property name="text">
+                        <string>?</string>
+                       </property>
+                      </widget>
+                     </item>
                     </layout>
                    </item>
                    <item>
@@ -886,6 +1081,31 @@ QGroupBox#groupBox::title {
                        </property>
                       </widget>
                      </item>
+                     <item>
+                      <widget class="QToolButton" name="dispersion_weight_tooltip">
+                       <property name="toolTip">
+                        <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Weight of the DFS term. &lt;/p&gt;&lt;p&gt;Higher value makes the correction prioritize reducing residual dispersion. &lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+                       </property>
+                       <property name="styleSheet">
+                        <string notr="true">QToolButton#dispersion_weight_tooltip {
+    border: 1px solid #888;
+    border-radius: 10px;
+    min-width: 20px;
+    max-width: 20px;
+    min-height: 20px;
+    max-height: 20px;
+    padding: 0px;
+    font-weight: bold;
+}
+QToolButton#dispersion_weight_tooltip:hover {
+    background-color: #e6e6e6;
+}</string>
+                       </property>
+                       <property name="text">
+                        <string>?</string>
+                       </property>
+                      </widget>
+                     </item>
                     </layout>
                    </item>
                    <item>
@@ -916,6 +1136,31 @@ QGroupBox#groupBox::title {
                          <horstretch>0</horstretch>
                          <verstretch>0</verstretch>
                         </sizepolicy>
+                       </property>
+                      </widget>
+                     </item>
+                     <item>
+                      <widget class="QToolButton" name="wakefield_weight_tooltip">
+                       <property name="toolTip">
+                        <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Weight of the WFS term. &lt;/p&gt;&lt;p&gt;Higher value makes the correction prioritize reducing intensity-dependent orbit changes. &lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+                       </property>
+                       <property name="styleSheet">
+                        <string notr="true">QToolButton#wakefield_weight_tooltip {
+    border: 1px solid #888;
+    border-radius: 10px;
+    min-width: 20px;
+    max-width: 20px;
+    min-height: 20px;
+    max-height: 20px;
+    padding: 0px;
+    font-weight: bold;
+}
+QToolButton#wakefield_weight_tooltip:hover {
+    background-color: #e6e6e6;
+}</string>
+                       </property>
+                       <property name="text">
+                        <string>?</string>
                        </property>
                       </widget>
                      </item>
@@ -970,7 +1215,7 @@ QGroupBox#groupBox::title {
                         <enum>Qt::NoFocus</enum>
                        </property>
                        <property name="toolTip">
-                        <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;PINV tolerance sets the pseudoinverse cutoff. Smaller values keep more modes and give stronger but noisier correction. Larger values remove weak modes, making correction more stable but sometimes weaker.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+                        <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;PINV tolerance sets the pseudoinverse cutoff. &lt;/p&gt;&lt;p&gt;&lt;span style=&quot; font-weight:600;&quot;&gt;Smaller values&lt;/span&gt; keep &lt;span style=&quot; font-weight:600;&quot;&gt;more modes&lt;/span&gt; and give &lt;span style=&quot; font-weight:600;&quot;&gt;stronger but noisier correction&lt;/span&gt;. &lt;/p&gt;&lt;p&gt;&lt;span style=&quot; font-weight:600;&quot;&gt;Larger values&lt;/span&gt; remove &lt;span style=&quot; font-weight:600;&quot;&gt;weak modes&lt;/span&gt;, making &lt;span style=&quot; font-weight:600;&quot;&gt;correction more stable but sometimes weaker&lt;/span&gt;.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
                        </property>
                        <property name="styleSheet">
                         <string notr="true">QToolButton#pinv_tooltip {
@@ -1028,6 +1273,31 @@ QToolButton#pinv_tooltip:hover {
                        </property>
                       </widget>
                      </item>
+                     <item>
+                      <widget class="QToolButton" name="n_iterations_tooltip">
+                       <property name="toolTip">
+                        <string>Number of correction iterations to run.</string>
+                       </property>
+                       <property name="styleSheet">
+                        <string notr="true">QToolButton#n_iterations_tooltip {
+    border: 1px solid #888;
+    border-radius: 10px;
+    min-width: 20px;
+    max-width: 20px;
+    min-height: 20px;
+    max-height: 20px;
+    padding: 0px;
+    font-weight: bold;
+}
+QToolButton#n_iterations_tooltip:hover {
+    background-color: #e6e6e6;
+}</string>
+                       </property>
+                       <property name="text">
+                        <string>?</string>
+                       </property>
+                      </widget>
+                     </item>
                     </layout>
                    </item>
                    <item>
@@ -1058,6 +1328,31 @@ QToolButton#pinv_tooltip:hover {
                          <horstretch>0</horstretch>
                          <verstretch>0</verstretch>
                         </sizepolicy>
+                       </property>
+                      </widget>
+                     </item>
+                     <item>
+                      <widget class="QToolButton" name="gain_tooltip">
+                       <property name="toolTip">
+                        <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Fraction of the &lt;span style=&quot; font-weight:600;&quot;&gt;computed correction &lt;/span&gt;applied at each iteration. &lt;/p&gt;&lt;p&gt;&lt;span style=&quot; font-weight:600;&quot;&gt;Lower gain is safer&lt;/span&gt;; higher gain is faster but can overshoot.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+                       </property>
+                       <property name="styleSheet">
+                        <string notr="true">QToolButton#gain_tooltip {
+    border: 1px solid #888;
+    border-radius: 10px;
+    min-width: 20px;
+    max-width: 20px;
+    min-height: 20px;
+    max-height: 20px;
+    padding: 0px;
+    font-weight: bold;
+}
+QToolButton#gain_tooltip:hover {
+    background-color: #e6e6e6;
+}</string>
+                       </property>
+                       <property name="text">
+                        <string>?</string>
                        </property>
                       </widget>
                      </item>
@@ -1118,7 +1413,7 @@ QToolButton#pinv_tooltip:hover {
                         <enum>Qt::NoFocus</enum>
                        </property>
                        <property name="toolTip">
-                        <string>Regularization parameter. If beta &gt; 0, the solver uses (A^T A + beta I)^-1 to stabilize the correction.</string>
+                        <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Tikhonov regularization strength. &lt;/p&gt;&lt;p&gt;If beta &amp;gt; 0, the solver uses (A^T A + beta I)^-1 to stabilize the correction.&lt;/p&gt;&lt;p&gt;&lt;br/&gt;&lt;/p&gt;&lt;p&gt;Use &lt;span style=&quot; font-weight:600;&quot;&gt;0 for standard pseudo-inverse.&lt;/span&gt;&lt;/p&gt;&lt;p&gt;&lt;span style=&quot; font-weight:600;&quot;&gt;Increase&lt;/span&gt; it to &lt;span style=&quot; font-weight:600;&quot;&gt;make the solution smoother and less sensitive to noise&lt;/span&gt;. &lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
                        </property>
                        <property name="styleSheet">
                         <string notr="true">QToolButton#beta_tooltip {
@@ -1140,6 +1435,45 @@ QToolButton#beta_tooltip:hover {
                        </property>
                        <property name="autoRaise">
                         <bool>true</bool>
+                       </property>
+                      </widget>
+                     </item>
+                    </layout>
+                   </item>
+                   <item>
+                    <layout class="QHBoxLayout" name="transmission_layout">
+                     <item>
+                      <widget class="QLabel" name="label_transmission">
+                       <property name="text">
+                        <string>Transmission threshold</string>
+                       </property>
+                      </widget>
+                     </item>
+                     <item>
+                      <widget class="QLineEdit" name="transmission_value"/>
+                     </item>
+                     <item>
+                      <widget class="QToolButton" name="transmission_tooltip">
+                       <property name="toolTip">
+                        <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Threshold [%] of initial transmission. When the transmission reaches this level, the correction stops.&lt;/p&gt;&lt;p&gt;&lt;br/&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+                       </property>
+                       <property name="styleSheet">
+                        <string notr="true">QToolButton#transmission_tooltip {
+    border: 1px solid #888;
+    border-radius: 10px;
+    min-width: 20px;
+    max-width: 20px;
+    min-height: 20px;
+    max-height: 20px;
+    padding: 0px;
+    font-weight: bold;
+}
+QToolButton#transmission_tooltip:hover {
+    background-color: #e6e6e6;
+}</string>
+                       </property>
+                       <property name="text">
+                        <string>?</string>
                        </property>
                       </widget>
                      </item>
@@ -1205,6 +1539,96 @@ QToolButton#jitter_subtraction_tooltip:hover {
                      </item>
                     </layout>
                    </item>
+                   <item>
+                    <layout class="QHBoxLayout" name="triangular_checkbox_layout">
+                     <item>
+                      <widget class="QCheckBox" name="triangular_checkbox">
+                       <property name="text">
+                        <string>Force triangular matrix</string>
+                       </property>
+                      </widget>
+                     </item>
+                     <item>
+                      <widget class="QToolButton" name="triangular_tooltip">
+                       <property name="minimumSize">
+                        <size>
+                         <width>22</width>
+                         <height>22</height>
+                        </size>
+                       </property>
+                       <property name="maximumSize">
+                        <size>
+                         <width>22</width>
+                         <height>22</height>
+                        </size>
+                       </property>
+                       <property name="focusPolicy">
+                        <enum>Qt::NoFocus</enum>
+                       </property>
+                       <property name="toolTip">
+                        <string>&lt;html&gt;&lt;body&gt;&lt;p&gt;Forces the response matrix to be triangular by setting the response of BPMs upstream of each actuator to zero.&lt;/p&gt;&lt;p&gt;Useful for transport lines or linacs. In a damping ring, the orbit is closed and each corrector can affect every BPM, so this option is usually not needed.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+                       </property>
+                       <property name="styleSheet">
+                        <string notr="true">QToolButton#triangular_tooltip {
+    border: 1px solid #888;
+    border-radius: 10px;
+    min-width: 20px;
+    max-width: 20px;
+    min-height: 20px;
+    max-height: 20px;
+    padding: 0px;
+    font-weight: bold;
+}
+QToolButton#triangular_tooltip:hover {
+    background-color: #e6e6e6;
+}</string>
+                       </property>
+                       <property name="text">
+                        <string>?</string>
+                       </property>
+                       <property name="autoRaise">
+                        <bool>true</bool>
+                       </property>
+                      </widget>
+                     </item>
+                    </layout>
+                   </item>
+                   <item>
+                    <layout class="QHBoxLayout" name="coupling_layout">
+                     <item>
+                      <widget class="QCheckBox" name="remove_coupling_checkbox">
+                       <property name="text">
+                        <string>Remove coupling</string>
+                       </property>
+                      </widget>
+                     </item>
+                     <item>
+                      <widget class="QToolButton" name="remove_coupling_tooltip">
+                       <property name="toolTip">
+                        <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Sets the cross-plane response blocks (Rxy and Ryx) to zero, decoupling horizontal and vertical correction. Use when the measured cross-plane coupling is dominated by noise, or when an uncoupled correction is intended.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+                       </property>
+                       <property name="styleSheet">
+                        <string notr="true">QToolButton#remove_coupling_tooltip {
+    border: 1px solid #888;
+    border-radius: 10px;
+    min-width: 20px;
+    max-width: 20px;
+    min-height: 20px;
+    max-height: 20px;
+    padding: 0px;
+    font-weight: bold;
+}
+QToolButton#remove_coupling_tooltip:hover {
+    background-color: #e6e6e6;
+}</string>
+                       </property>
+                       <property name="text">
+                        <string>?</string>
+                       </property>
+                      </widget>
+                     </item>
+                    </layout>
+                   </item>
                   </layout>
                  </widget>
                 </item>
@@ -1253,13 +1677,6 @@ QGroupBox#correction_controls_group::title {
                     <widget class="QPushButton" name="restore_initial_settings">
                      <property name="text">
                       <string>Restore initial settings</string>
-                     </property>
-                    </widget>
-                   </item>
-                   <item>
-                    <widget class="QPushButton" name="show_orbit_RMS_button">
-                     <property name="text">
-                      <string>Show Orbit RMS</string>
                      </property>
                     </widget>
                    </item>
@@ -1354,6 +1771,31 @@ QGroupBox#current_groupbox_right::title {
                           </property>
                          </widget>
                         </item>
+                        <item>
+                         <widget class="QToolButton" name="max_strength_tooltip">
+                          <property name="toolTip">
+                           <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Maximum allowed corrector strength during correction. &lt;/p&gt;&lt;p&gt;&lt;br/&gt;&lt;/p&gt;&lt;p&gt;Computed corrections are clipped to these limits.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+                          </property>
+                          <property name="styleSheet">
+                           <string notr="true">QToolButton#max_strength_tooltip {
+    border: 1px solid #888;
+    border-radius: 10px;
+    min-width: 20px;
+    max-width: 20px;
+    min-height: 20px;
+    max-height: 20px;
+    padding: 0px;
+    font-weight: bold;
+}
+QToolButton#max_strength_tooltip:hover {
+    background-color: #e6e6e6;
+}</string>
+                          </property>
+                          <property name="text">
+                           <string>?</string>
+                          </property>
+                         </widget>
+                        </item>
                        </layout>
                       </item>
                      </layout>
@@ -1420,9 +1862,9 @@ QGroupBox#current_groupbox_right::title {
                      <number>0</number>
                     </property>
                    </widget>
-                  </item>
-                  <item>
-                   <spacer name="logo_right_spacer">
+                 </item>
+                 <item>
+                  <spacer name="logo_right_spacer">
                     <property name="orientation">
                      <enum>Qt::Horizontal</enum>
                     </property>
@@ -1432,12 +1874,28 @@ QGroupBox#current_groupbox_right::title {
                       <height>20</height>
                      </size>
                     </property>
-                   </spacer>
-                  </item>
-                 </layout>
-                </item>
-                <item>
-                 <spacer name="controls_vertical_spacer">
+                  </spacer>
+                 </item>
+                </layout>
+               </item>
+               <item>
+                <widget class="QLabel" name="machine_clock_label">
+                 <property name="styleSheet">
+                  <string notr="true">QLabel#machine_clock_label {
+    font-weight: 600;
+    padding: 4px 8px;
+}</string>
+                 </property>
+                 <property name="text">
+                  <string>Time: --</string>
+                 </property>
+                 <property name="alignment">
+                  <set>Qt::AlignCenter</set>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <spacer name="controls_vertical_spacer">
                   <property name="orientation">
                    <enum>Qt::Vertical</enum>
                   </property>
@@ -1464,7 +1922,7 @@ QGroupBox#current_groupbox_right::title {
       </item>
      </layout>
     </item>
-   </layout>
+  </layout>
   </widget>
  </widget>
  <resources/>

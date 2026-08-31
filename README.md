@@ -24,6 +24,22 @@ poetry run python ComputeResponseMatrix_GUI.py
 poetry run python SysID_GUI.py
 ```
 
+### While running Emittance_Measurement_GUI.py for the first time on a system:
+#### Linux:
+```bash
+cd "Machine specifics, user implementations/ATF2/libmagnet"
+make clean
+make
+gfortran -shared -fPIC -o libmagnet.so *.o
+```
+#### MacOS:
+```bash
+cd "Machine specifics, user implementations/ATF2/libmagnet"
+make clean
+make
+gfortran -dynamiclib -o libmagnet.dylib *.o
+```
+
 # FlightSimulator's `Interface` description
 
 This class defines how the user interacts with the real or simulated machine when reading beam instrumentation and steering devices and for writing corrector set-points in a control system for the specific accelerator facility. It wraps common operations on BPMs, ICTs, and corrector magnets.
