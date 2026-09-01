@@ -25,10 +25,25 @@ The generated ring has a circumference of 138.55953941176458 m, 36 bends,
 vertical steerers.  `InterfaceATF2_DR_RFTrack` uses this builder instead of
 inserting artificial steerers into every third quadrupole.
 
-`ATF_DR_twiss_file.tws` remains the legacy target-optics file and was not made
-from this exact daihon revision.  It can still be used as a historical
-comparison, but a final SAD-to-RF-Track optics equivalence claim requires
-reference Twiss/COD/dispersion output from the exact daihon.
+`ATF_DR_twiss_file.tws` remains the legacy MAD-X target-optics file and was
+not made from this exact daihon revision.  The checked-in
+`ATF_DR_20111111b_RFTrack_twiss.tfs` is instead generated from this RF-Track
+lattice, linearized about its nominal periodic closed orbit.  Its filename
+identifies the reference daihon revision.  It contains one row for every
+RF-Track lattice element (including BPMs, magnets, drifts and the added thin
+skew multipoles), with beta, alpha, closed orbit and dispersion.  It is the
+nominal optics reference used by the correction-validation notebook.  The
+table also contains the magnetic/import fields needed by `RF_Track.Lattice`,
+so the notebook reads this TFS directly as its lattice instead of rebuilding
+the lattice in memory.  Regenerate it with:
+
+```bash
+PYTHONPATH=. /path/to/rftrack-env/bin/python \
+  Interfaces/ATF2/DR_ATF2/ATF_DR_RFTrack_twiss.py
+```
+
+A final SAD-to-RF-Track optics equivalence claim still requires reference
+Twiss/COD/dispersion output from the exact SAD daihon.
 
 ## Periodic orbit correction
 
