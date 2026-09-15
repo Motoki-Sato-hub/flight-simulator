@@ -160,6 +160,7 @@ class CLEAR_real_machine(AbstractMachineInterface):
         self.start = self.tracking_interface.start
         self.end = self.tracking_interface.end
         self.bg_shots = int(bg_shots)
+        self.initial_quad_currents = self.get_quadrupoles()["bdes"].copy()
 
     def CamList(self):
         _JSON_PATH = os.path.join(os.path.dirname(__file__), 'cameras.json')
@@ -251,7 +252,7 @@ class CLEAR_real_machine(AbstractMachineInterface):
         )
 
     def change_energy(self, scale=0.5):
-        scaled_optics_currents = np.asarray([10.0, 40.0, 10.0, 40.0, 60.0, 30.0, 40.0, 70.0, 40.0, 0.0, 0.0], dtype=float) * float(scale)
+        scaled_optics_currents = self.initial_quad_currents * float(scale)
         for attempt in range(1, 10):
             if self.set_quadrupoles(self.quadrupoles, scaled_optics_currents):
                 return True
