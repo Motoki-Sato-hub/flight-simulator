@@ -902,7 +902,7 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS):
             prev_Dy = None
             prev_applied_kick = None
 
-            for it in range(iters):
+            for it in range(iters + 1):
                 if self._cancel:
                     break
                 self._step = False

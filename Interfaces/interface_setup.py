@@ -295,6 +295,7 @@ INTERFACE_SETUP = {
                     "sysid_corrector_kick": 1,
                     "bba_max_h_strength": 9.99,
                     "bba_max_v_strength": 9.99,
+
                 },
             "bounds": {
                 "emit_x_norm": [0.0, 50.0],
