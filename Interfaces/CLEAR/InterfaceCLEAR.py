@@ -261,7 +261,7 @@ class CLEAR_real_machine(AbstractMachineInterface):
         raise RuntimeError("Not all quadrupoles reached their scaled-optics currents after 3 attempts.")
 
     def reset_intensity(self):
-        return self.change_energy(scale=1.0)
+        return self.change_intensity(scale=1.0)
 
     def change_energy(self):
         # this is not a charge change, but rf phase - based change in the energy, probably if you would

@@ -374,9 +374,10 @@ class MainWindow(QMainWindow, SaveOrLoad):
         self.max_horizontal_current_spinbox.setSingleStep(0.01)
         self.max_vertical_current_spinbox.setValue(max_curr_v)
         self.max_vertical_current_spinbox.setSingleStep(0.01)
-        self.horizontal_excursion_spinbox.setValue(0.5)
+        default_excursion = 5.0 if interface.get_name() == "CLEAR" else 0.5
+        self.horizontal_excursion_spinbox.setValue(default_excursion)
         self.horizontal_excursion_spinbox.setSingleStep(0.1)
-        self.vertical_excursion_spinbox.setValue(0.5)
+        self.vertical_excursion_spinbox.setValue(default_excursion)
         self.vertical_excursion_spinbox.setSingleStep(0.1)
         self._setup_nsamples_control()
         self._setup_beam_change_controls()
