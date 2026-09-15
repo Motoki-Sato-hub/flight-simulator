@@ -486,6 +486,7 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS):
     def eventFilter(self, watched, event):
         if watched is self.bpms_list.viewport():
             if event.type() == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
+                self._bpm_weights_double_click = False
                 self._bpm_selection_before_click = self.bpms_list.selectedItems()
             elif event.type() == QEvent.Type.MouseButtonDblClick and event.button() == Qt.MouseButton.LeftButton:
                 bpm = self.bpms_list.itemAt(event.pos())
