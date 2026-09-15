@@ -281,9 +281,9 @@ INTERFACE_SETUP = {
                     "test": {"label": "Test [deg]", "attribute": "rf_phase_test", "default": 145.0},
                 },
                 "intensity": {
-                    "label": "Change intensity",
-                    "tooltip": "Adds the specified number of UVATT2 steps to the current position for WFS. The captured position is restored afterward.",
-                    "test": {"label": "Test steps", "attribute": "uvatt2_test_steps", "default": 1000},
+                    "label": "Scale quadrupoles",
+                    "tooltip": "Enter the scaling factor of quadrupoles. It will scale the current quadrupole current to a scale * currents.",
+                    "test": {"label": "Scaling factor", "attribute": "quadrupole_scaling_factor", "default": 0.5},
                 },
             },
             "settings": {"nsamples":3},

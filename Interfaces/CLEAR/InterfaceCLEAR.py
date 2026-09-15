@@ -59,6 +59,7 @@ class CLEAR_real_machine(AbstractMachineInterface):
         self.rf_phase_nominal = 128 # degrees
         self.rf_phase_test = 108 # degrees
         self.uvatt2_test_steps = 1000
+        self.quadrupole_scaling_factor = 0.5
 
         # Bpms and correctors in beamline order
         sequence = [
@@ -251,7 +252,7 @@ class CLEAR_real_machine(AbstractMachineInterface):
             f"(last readback={last_value})."
         )
 
-    def change_intensity(self, scale=0.5):
+    def change_intensity(self, scale=self.quadrupole_scaling_factor):
         scaled_optics_currents = self.initial_quad_currents * float(scale)
         for attempt in range(1, 10):
             if self.set_quadrupoles(self.quadrupoles, scaled_optics_currents):
