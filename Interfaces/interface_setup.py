@@ -289,7 +289,7 @@ INTERFACE_SETUP = {
             "settings": {"nsamples":3},
             "units":
                 {
-                    "corrector_strength": "gauss*m",
+                    "corrector_strength": "A",
                     "quadrupole_strength": "A",
                     "bpm_position": "mm",
                     "sysid_corrector_kick": 1,
