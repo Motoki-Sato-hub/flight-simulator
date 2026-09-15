@@ -645,7 +645,7 @@ class MainWindow(QMainWindow, SaveOrLoad):
                 f"Not every corrector was set back at its saved current before the {mode.name} measurement. Check the correctors on the machine.")
 
         if mode==Mode.Orbit:
-            self.interface.reset_energy()
+            #self.interface.reset_energy()
             #self.interface.reset_intensity()
             print("Nominal beam state confirmed for Orbit mode")
         elif mode==Mode.Dispersion:

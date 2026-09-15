@@ -82,8 +82,7 @@ class MatplotlibWidget(FigureCanvas):
         self.figure = Figure(figsize=(6, 4), tight_layout=True)
         super().__init__(self.figure)
         self.setParent(parent)
-
-
+ 
 class OptimizationWorker(QObject):
     finished = pyqtSignal(object)
     error = pyqtSignal(str)
