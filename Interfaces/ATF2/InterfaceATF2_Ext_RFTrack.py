@@ -1154,7 +1154,6 @@ class InterfaceATF2_Ext_RFTrack(AbstractMachineInterface):
         bpms = self.lattice["M" + name]
         if not isinstance(bpms, (list, tuple)):
             bpms = [bpms]
-
         for elem in elems:
             if add == True:
                 x = elem.get_offsets()[0][0]  # mm

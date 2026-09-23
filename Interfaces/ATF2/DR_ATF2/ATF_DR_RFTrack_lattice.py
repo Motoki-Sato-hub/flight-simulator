@@ -6,11 +6,11 @@ The checked-in JSON is generated from the SAD element definitions and
 ``LINE RING0`` by ``generate_atf_dr_rftrack_lattice.py``.  SAD itself is not
 required to build or track this lattice.
 
-This first model is deliberately transverse-only: synchrotron radiation and
-the thin SAD RF cavity are both disabled.  Consequently the reference energy
-is constant and the lattice is suitable for one-turn optics, closed-orbit,
-dispersion and response/correction studies.  Longitudinal capture and damping
-studies require a separately validated radiation/RF model.
+The default model is deliberately transverse-only: synchrotron radiation and
+the thin SAD RF cavity are disabled.  ``rf_mode='equilibrium'`` is an explicit
+opt-in pilot which adds incoherent synchrotron radiation in every SBend and a
+short pillbox representation of SAD's 714-MHz CAV.  It is for turn-by-turn
+equilibrium-emittance studies, not for the closed-orbit response routines.
 """
 
 from __future__ import annotations
@@ -27,23 +27,134 @@ REFERENCE_SAD_DAIHON = "atfdr-design-20111111b.sad"
 REFERENCE_SAD_RELATIVE_PATH = "operation/daihon/atfdr-design-20111111b.sad"
 LATTICE_DATA_FILENAME = "ATF_DR_RFTrack_lattice.json"
 NOMINAL_MOMENTUM_MEV_C = 1299.9999
+EQUILIBRIUM_RF_CAVITY_LENGTH_M = 1e-3
+EQUILIBRIUM_RF_PHASE_DEG = 180.0
 
 
-def load_lattice_data() -> dict[str, Any]:
-    path = Path(__file__).with_name(LATTICE_DATA_FILENAME)
+def load_lattice_data(
+    lattice_data_path: str | Path | None = None,
+) -> dict[str, Any]:
+    """Load nominal data, or an explicitly selected compatible SAD export."""
+    path = (
+        Path(lattice_data_path)
+        if lattice_data_path is not None
+        else Path(__file__).with_name(LATTICE_DATA_FILENAME)
+    )
     with path.open(encoding="utf-8") as stream:
         data = json.load(stream)
-    reference = data.get("metadata", {}).get("reference_sad_daihon")
-    if reference != REFERENCE_SAD_DAIHON:
+    metadata = data.get("metadata", {})
+    if metadata.get("ring_line") != "RING0":
         raise ValueError(
-            f"Unexpected SAD reference in {path}: {reference!r}"
+            f"Expected a RING0 SAD export in {path}, got {metadata!r}"
         )
     return data
 
 
-def get_lattice_metadata() -> dict[str, Any]:
+def get_lattice_metadata(lattice_data_path: str | Path | None = None) -> dict[str, Any]:
     """Return a copy of the source and geometry metadata."""
-    return dict(load_lattice_data()["metadata"])
+    return dict(load_lattice_data(lattice_data_path)["metadata"])
+
+
+def get_bpm_nearest_magnet_names(
+    lattice_data_path: str | Path | None = None,
+) -> dict[str, str]:
+    """Map each BPM to its nearest quadrupole or sextupole centre.
+
+    Kubo's BPM-error model defines the BPM offset with respect to the field
+    centre of the nearest quadrupole or sextupole.  The mapping is derived
+    from the generated SAD sequence, not from a hard-coded BPM numbering.
+    """
+    data = load_lattice_data(lattice_data_path)
+    definitions = data["definitions"]
+    circumference = float(data["metadata"]["circumference_m"])
+    occurrences: Counter[str] = Counter()
+    bpm_index = 0
+    drift_index = 0
+    s = 0.0
+    bpm_positions: list[tuple[str, float]] = []
+    magnet_positions: list[tuple[str, float]] = []
+
+    for source_name in data["sequence"]:
+        definition = definitions[source_name]
+        element_type = str(definition["type"])
+        attributes = definition["attributes"]
+        length = float(attributes.get("L", 0.0))
+        occurrences[source_name] += 1
+        if element_type == "DRIFT" or (
+            element_type == "BEND"
+            and (abs(float(attributes.get("ANGLE", 0.0))) == 0.0)
+        ):
+            drift_index += 1
+        if source_name == "M":
+            bpm_index += 1
+        instance_name = _instance_name(
+            source_name, element_type, occurrences, bpm_index, drift_index
+        )
+        centre = s + 0.5 * length
+        if source_name == "M":
+            bpm_positions.append((instance_name, centre))
+        if element_type in {"QUAD", "SEXT"} and length > 0.0:
+            magnet_positions.append((instance_name, centre))
+        s += length
+
+    if not bpm_positions or not magnet_positions:
+        raise ValueError("The SAD export did not contain BPMs and quadrupole/sextupole magnets")
+    return {
+        bpm_name: min(
+            magnet_positions,
+            key=lambda item: min(
+                abs(position - item[1]), circumference - abs(position - item[1])
+            ),
+        )[0]
+        for bpm_name, position in bpm_positions
+    }
+
+
+def get_magnet_centres(
+    lattice_data_path: str | Path | None = None,
+) -> list[dict[str, Any]]:
+    """Return SAD-order centres of the 204 main ring magnets.
+
+    This deliberately excludes correctors and monitors.  It is used to attach
+    Kubo's published Fig. 1/2 alignment points to the corresponding main
+    quadrupole, sextupole, and finite-angle bend in a compatible SAD export.
+    """
+    data = load_lattice_data(lattice_data_path)
+    definitions = data["definitions"]
+    occurrences: Counter[str] = Counter()
+    bpm_index = 0
+    drift_index = 0
+    s = 0.0
+    centres: list[dict[str, Any]] = []
+
+    for source_name in data["sequence"]:
+        definition = definitions[source_name]
+        element_type = str(definition["type"])
+        attributes = definition["attributes"]
+        length = float(attributes.get("L", 0.0))
+        angle = float(attributes.get("ANGLE", 0.0))
+        occurrences[source_name] += 1
+        if element_type == "DRIFT" or (element_type == "BEND" and angle == 0.0):
+            drift_index += 1
+        if source_name == "M":
+            bpm_index += 1
+        instance_name = _instance_name(
+            source_name, element_type, occurrences, bpm_index, drift_index
+        )
+        if (
+            (element_type in {"QUAD", "SEXT"} and length > 0.0)
+            or (element_type == "BEND" and abs(angle) > 0.0)
+        ):
+            centres.append(
+                {
+                    "name": instance_name,
+                    "type": element_type,
+                    "s_m": s + 0.5 * length,
+                }
+            )
+        s += length
+
+    return centres
 
 
 def _instance_name(
@@ -69,6 +180,11 @@ def build_atf_dr_lattice(
     charge: float = -1.0,
     *,
     rf_mode: str = "disabled",
+    radiation_quantum: bool = True,
+    radiation_steps: int = 10,
+    rf_phase_deg: float | None = None,
+    rf_voltage_scale: float = 1.0,
+    lattice_data_path: str | Path | None = None,
 ):
     """Build the ATF DR ``RING0`` lattice using RF-Track elements.
 
@@ -79,21 +195,39 @@ def build_atf_dr_lattice(
     charge:
         Particle charge in elementary-charge units.  The default is electron.
     rf_mode:
-        Only ``"disabled"`` is currently accepted.  The zero-length SAD
-        cavity is represented by a named, zero-length drift.  This avoids the
-        invalid zero-length Pillbox cavity produced by the old TFS importer.
+        ``"disabled"`` keeps the transverse response model.  ``"equilibrium"``
+        adds radiation with quantum excitation to each SBend and represents
+        the zero-length SAD CAV as a 1-mm 714-MHz pillbox.  Its phase must be
+        synchronized by the emittance workflow before multi-turn tracking.
+    radiation_quantum:
+        Enable quantum excitation when ``rf_mode='equilibrium'``.  Set false
+        only for deterministic RF-phase synchronization and damping checks.
+    radiation_steps:
+        Collective-effect integration steps per SBend in equilibrium mode.
+    rf_phase_deg:
+        Pillbox phase used only by ``rf_mode='equilibrium'``.  ``None`` uses
+        the 180-degree 2011-reference setting; historical optics may require
+        an explicit phase scan before radiation equilibrium is evaluated.
+    rf_voltage_scale:
+        Multiplicative diagnostic factor for the SAD cavity voltage.  The
+        default is one; any other value is an explicit RF-model scan.
+    lattice_data_path:
+        Optional generated SAD export.  The default is the checked-in 2011
+        lattice; an explicit path is intended for historical comparisons and
+        never changes that default.
     """
-    if rf_mode != "disabled":
-        raise NotImplementedError(
-            "The ATF DR radiation/RF longitudinal model has not been validated; "
-            "use rf_mode='disabled' for transverse correction studies."
-        )
+    if rf_mode not in {"disabled", "equilibrium"}:
+        raise ValueError("rf_mode must be 'disabled' or 'equilibrium'")
+    if radiation_steps < 1:
+        raise ValueError("radiation_steps must be positive")
     if charge == 0:
         raise ValueError("charge must be non-zero")
+    if rf_voltage_scale <= 0.0:
+        raise ValueError("rf_voltage_scale must be positive")
 
     import RF_Track as rft
 
-    data = load_lattice_data()
+    data = load_lattice_data(lattice_data_path)
     definitions = data["definitions"]
     p_over_q = float(momentum_mev_c) / float(charge)
     lattice = rft.Lattice()
@@ -131,6 +265,13 @@ def build_atf_dr_lattice(
                     angle / 2.0,
                 )
                 element.set_K1(float(attributes.get("K1", 0.0)))
+                if rf_mode == "equilibrium":
+                    element.set_cfx_nsteps(int(radiation_steps))
+                    element.add_collective_effect(
+                        rft.IncoherentSynchrotronRadiation(
+                            quantum=bool(radiation_quantum)
+                        )
+                    )
             else:
                 # Zero-angle injection/extraction bends and BHE are passive in
                 # this model; operational DR steerers are the ZH/ZV elements.
@@ -164,8 +305,25 @@ def build_atf_dr_lattice(
             element = rft.Drift(length)
             drift_index += 1
         elif element_type == "CAVI":
-            element = rft.Drift(0.0)
-            drift_index += 1
+            if rf_mode == "disabled":
+                element = rft.Drift(0.0)
+                drift_index += 1
+            else:
+                voltage_v = float(attributes["VOLT"]) * float(rf_voltage_scale)
+                frequency_hz = float(attributes["FREQ"])
+                # SAD's CAVI is thin.  A short pillbox preserves the location
+                # while making a longitudinal RF kick available to RF-Track.
+                element = rft.Pillbox_Cavity(
+                    np.array([[voltage_v / EQUILIBRIUM_RF_CAVITY_LENGTH_M]]),
+                    frequency_hz,
+                    EQUILIBRIUM_RF_CAVITY_LENGTH_M,
+                    1,
+                )
+                element.set_t0(0.0)
+                element.set_phid(
+                    EQUILIBRIUM_RF_PHASE_DEG
+                    if rf_phase_deg is None else float(rf_phase_deg)
+                )
         else:  # pragma: no cover - protected by the generator
             raise ValueError(f"Unsupported SAD element type: {element_type}")
 
@@ -178,6 +336,27 @@ def build_atf_dr_lattice(
         )
         element.set_name(instance_name)
         lattice.append(element)
+
+        if element_type == "QUAD":
+            # A physical quadrupole roll is represented explicitly as a thin
+            # skew-K1L companion.  RF-Track Element.set_offsets changes the
+            # placement frame but does not provide the field-roll error needed
+            # for ATF coupling/emittance studies.  The companion is zero in
+            # the nominal lattice and is driven by set_quadrupole_roll_error.
+            roll = rft.Multipole(0.0)
+            roll.set_KnL(p_over_q, np.zeros(2, dtype=complex))
+            roll.set_name(f"{instance_name}$ROLL")
+            lattice.append(roll)
+
+        if element_type == "SEXT" and length:
+            # A sextupole roll produces a skew-sextupole component.  It is
+            # kept separate from the normal Sextupole so that a Table-I
+            # magnet-roll error can be changed without modifying the SAD
+            # reference field.
+            roll = rft.Multipole(0.0)
+            roll.set_KnL(p_over_q, np.zeros(3, dtype=complex))
+            roll.set_name(f"{instance_name}$ROLL")
+            lattice.append(roll)
 
         if source_name in {"SD1R", "SF1R"}:
             # SAD's skew-coupling correction drives the skew-quadrupole
@@ -197,11 +376,79 @@ def build_atf_dr_lattice(
     return lattice
 
 
+def set_quadrupole_roll_error(
+    lattice,
+    quadrupole_name: str,
+    roll_rad: float,
+    *,
+    momentum_mev_c: float = NOMINAL_MOMENTUM_MEV_C,
+    charge: float = -1.0,
+) -> None:
+    """Set the thin skew-K1L equivalent of a rolled quadrupole.
+
+    To first order, a normal quadrupole ``K1L`` rolled by ``theta`` contains a
+    skew component ``2 theta K1L``.  The normal quadrupole and zero-length
+    companion are adjacent, so this is the appropriate linear error model for
+    the small (300-urad) Kubo Table-I rotations.
+    """
+    quadrupole = lattice[quadrupole_name]
+    if isinstance(quadrupole, list):
+        if len(quadrupole) != 1:
+            raise ValueError(f"Expected one quadrupole named {quadrupole_name}")
+        quadrupole = quadrupole[0]
+    companion_name = f"{quadrupole_name}$ROLL"
+    companion = lattice[companion_name]
+    if isinstance(companion, list):
+        if len(companion) != 1:
+            raise ValueError(f"Expected one roll companion named {companion_name}")
+        companion = companion[0]
+    p_over_q = float(momentum_mev_c) / float(charge)
+    strengths = np.asarray(companion.get_KnL(p_over_q), dtype=complex).copy()
+    strengths.reshape(-1)[1] = 2j * float(roll_rad) * quadrupole.get_K1L(p_over_q)
+    companion.set_KnL(p_over_q, strengths)
+
+
+def set_sextupole_roll_error(
+    lattice,
+    sextupole_name: str,
+    roll_rad: float,
+    *,
+    momentum_mev_c: float = NOMINAL_MOMENTUM_MEV_C,
+    charge: float = -1.0,
+) -> None:
+    """Set the thin skew-K2L equivalent of a rolled sextupole.
+
+    To first order, rolling a normal sextupole by ``theta`` produces the
+    skew component ``3 theta K2L``.  RF-Track placement-frame rotations do
+    not rotate the multipole field itself, so a zero-length companion is used
+    just as for quadrupoles.
+    """
+    sextupole = lattice[sextupole_name]
+    if isinstance(sextupole, list):
+        if len(sextupole) != 1:
+            raise ValueError(f"Expected one sextupole named {sextupole_name}")
+        sextupole = sextupole[0]
+    companion_name = f"{sextupole_name}$ROLL"
+    companion = lattice[companion_name]
+    if isinstance(companion, list):
+        if len(companion) != 1:
+            raise ValueError(f"Expected one roll companion named {companion_name}")
+        companion = companion[0]
+    p_over_q = float(momentum_mev_c) / float(charge)
+    strengths = np.asarray(companion.get_KnL(p_over_q), dtype=complex).copy()
+    strengths.reshape(-1)[2] = 3j * float(roll_rad) * sextupole.get_K2L(p_over_q)
+    companion.set_KnL(p_over_q, strengths)
+
+
 __all__ = [
     "REFERENCE_SAD_DAIHON",
     "REFERENCE_SAD_RELATIVE_PATH",
     "NOMINAL_MOMENTUM_MEV_C",
     "build_atf_dr_lattice",
+    "set_quadrupole_roll_error",
+    "set_sextupole_roll_error",
     "get_lattice_metadata",
+    "get_bpm_nearest_magnet_names",
+    "get_magnet_centres",
     "load_lattice_data",
 ]

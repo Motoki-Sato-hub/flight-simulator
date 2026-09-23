@@ -119,6 +119,48 @@ interface.apply_periodic_coupling_correction(suggestion)
 `get_skew_correctors` and `set_skew_correctors` expose those normalized
 integrated K1L values for simulation-error setup and inspection.
 
+## Kubo-style deterministic validation
+
+`Helper scripts and tests/Tests/ATF_DR_RFTrack_Validation/one_turn_correction_validation.py` is the primary
+workflow validation for the Kubo ATF DR procedure.  It uses independent
+nominal-model and virtual-machine lattices, inserts one hidden deterministic
+fault into the latter, and verifies in sequence: x/y COD, vertical
+orbit-dispersion, and two-horizontal-probe skew-coupling correction.  It is
+deliberately separate from the random-error robustness studies.
+
+```bash
+MPLBACKEND=Agg MPLCONFIGDIR=/tmp/mpl-rftrack PYTHONPATH=. \
+  /path/to/rftrack-env/bin/python \
+  "Helper scripts and tests/Tests/ATF_DR_RFTrack_Validation/one_turn_correction_validation.py"
+```
+
+The output JSON and figure are written to `analysis/DR-RFTrack/` alongside the
+conference-slide generator `create_kubo_rftrack_slides.py`.
+
+## Kubo 2003 sequential-procedure pilot
+
+`Helper scripts and tests/Tests/ATF_DR_RFTrack_Validation/kubo_style_procedure.py` implements
+the response topology used in K. Kubo, *Phys. Rev. ST Accel. Beams* **6**,
+092801 (2003): one nominal response set, all 50 ZH / 51 ZV steerers, the 34
+SD1R-family skew actuators, two horizontal probes, and the sequential
+COD -> vertical COD/dispersion -> coupling procedure.  BPM offset and roll
+are applied in the readback model so offsets cancel from difference
+measurements while BPM roll contaminates measured dispersion and coupling.
+
+The checked-in 0.1-scale pilot results are not a reproduction of the
+published 500-seed emittance study.  For the current 2011 lattice, a
+full-scale seed-2003 run now retains the
+periodic-orbit branch by applying response feedback during the error ramp at
+tighter continuation thresholds (0.5 mm in each plane), without changing the
+Table-I error amplitudes or the final 2 mm / 1 mm rough-COD limits.  The
+subsequent COD, dispersion and coupling quality still requires improvement
+and a multi-seed comparison; a stable full-scale orbit is not itself an
+emittance validation.
+The script caches the costly nominal response calculation under
+`analysis/DR-RFTrack/`.
+Its current dispersion statistic is over all RF-Track BPMs; mapping the exact
+SAD arc-BPM selection is a remaining comparison task.
+
 The DR DFS energy step is 0.5%.  This is close to the sub-percent momentum
 change used by the SAD frequency-shift dispersion procedure and stays inside
 the momentum range validated for this transverse-only model.

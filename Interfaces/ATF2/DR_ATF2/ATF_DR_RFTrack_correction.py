@@ -5,9 +5,12 @@ closed orbit around the ring, builds steerer responses and solves a constrained
 least-squares problem.  This module provides the corresponding model-side
 operations without requiring SAD.
 
-Coordinates returned by RF-Track are in mm and mrad.  Corrector values are in
-caller units; ``actuator_scale`` converts one caller unit to the value passed to
-``RF_Track.Corrector.set_strength``.
+Coordinates returned by RF-Track are in mm and mrad.  The public correction
+API, and the SAD/Kubo convention, use physical angular kicks in rad.
+``RF_Track.Corrector.set_kick`` instead uses the phase-space slope convention
+(mrad), so the conversion is made only at that API boundary.  This deliberately
+avoids confusing a physical steerer kick with either magnetic field strength or
+RF-Track's internal mrad coordinate.
 """
 
 from __future__ import annotations
@@ -18,6 +21,9 @@ from typing import Sequence
 import numpy as np
 
 from .ATF_DR_RFTrack_lattice import NOMINAL_MOMENTUM_MEV_C
+
+
+RFTRACK_MRAD_PER_RAD = 1.0e3
 
 
 class ClosedOrbitError(RuntimeError):
@@ -273,9 +279,23 @@ class ATFDRRingCorrection:
         for name in names:
             if name not in self.bpm_names:
                 raise ValueError(f"Unknown BPM: {name}")
-            reading = np.asarray(self._single_element(name).get_reading(), dtype=float)
+            reading = np.asarray(
+                self._single_element(name).get_reading(), dtype=float
+            ).reshape(-1)
+            if reading.size < 2:
+                raise ParticleLostError(
+                    f"RF-Track BPM {name} did not receive the closed-orbit probe"
+                )
             readings.append(reading[:2])
-        return names, np.asarray(readings, dtype=float)
+        try:
+            positions = np.asarray(readings, dtype=float)
+        except ValueError as error:
+            shapes = {name: tuple(value.shape) for name, value in zip(names, readings)}
+            raise ParticleLostError(
+                "Inconsistent BPM readback shapes after closed-orbit tracking: "
+                f"{shapes}"
+            ) from error
+        return names, positions
 
     def find_closed_orbit(
         self,
@@ -283,8 +303,14 @@ class ATFDRRingCorrection:
         momentum_mev_c: float | None = None,
         initial_coordinates: Sequence[float] | None = None,
         bpm_names: Sequence[str] | None = None,
-        finite_difference_step: float = 1e-5,
-        tolerance: float = 1e-8,
+        # A 0.1-um / 0.1-urad Newton probe is robust against the strongly
+        # sextupole-fed-down Table-I error lattice while remaining linear for
+        # closed-orbit solving.
+        finite_difference_step: float = 1e-4,
+        # Coordinates are mm/mrad.  1e-7 corresponds to a sub-nanometre
+        # one-turn residual and avoids rejecting a valid fixed point because
+        # RF-Track finite-difference noise no longer decreases at 1e-8.
+        tolerance: float = 1e-7,
         max_iterations: int = 8,
     ) -> ClosedOrbitResult:
         """Solve ``one_turn(z) - z = 0`` with a numerical Newton method."""
@@ -353,8 +379,48 @@ class ATFDRRingCorrection:
                     accepted = True
                     break
             if not accepted:
+                # Strong sextupole feed-down can make a Newton line search
+                # non-monotonic even when a nearby periodic solution exists.
+                # Use a bounded trust-region residual minimization only as a
+                # fallback; ordinary nominal response calculations remain on
+                # the faster Newton path above.
+                try:
+                    from scipy.optimize import least_squares
+
+                    def fixed_point_residual(trial):
+                        try:
+                            return self._track_coordinates(trial, momentum) - trial
+                        except ParticleLostError:
+                            return np.full(4, 1e6, dtype=float)
+
+                    optimized = least_squares(
+                        fixed_point_residual,
+                        z,
+                        method="trf",
+                        diff_step=1e-4,
+                        xtol=1e-11,
+                        ftol=1e-11,
+                        gtol=1e-11,
+                        max_nfev=120,
+                    )
+                    optimized_residual = fixed_point_residual(optimized.x)
+                    optimized_norm = float(np.linalg.norm(optimized_residual, ord=np.inf))
+                    if optimized_norm <= tolerance:
+                        self._track_coordinates(optimized.x, momentum)
+                        names, positions = self._bpm_positions(bpm_names)
+                        return ClosedOrbitResult(
+                            initial_coordinates=optimized.x.copy(),
+                            bpm_names=names,
+                            bpm_positions=positions,
+                            momentum_mev_c=momentum,
+                            iterations=iterations + int(optimized.nfev),
+                            residual_norm=optimized_norm,
+                        )
+                except Exception:
+                    pass
                 raise ClosedOrbitError(
-                    "Closed-orbit Newton iteration did not reduce the residual"
+                    "Closed-orbit Newton/trust-region search did not find a "
+                    f"fixed point (residual={residual_norm:.3e})"
                 )
 
         raise ClosedOrbitError(
@@ -406,6 +472,20 @@ class ATFDRRingCorrection:
     def _p_over_q(self) -> float:
         return self.momentum_mev_c / self.charge
 
+    def _get_corrector_kick(self, element) -> np.ndarray:
+        """Return physical corrector kicks in rad, not magnetic strengths."""
+        return (
+            np.asarray(element.get_kick(self._p_over_q), dtype=float)
+            / RFTRACK_MRAD_PER_RAD
+        )
+
+    def _set_corrector_kick(self, element, kick: Sequence[float]) -> None:
+        """Set a physical kick in rad through RF-Track's mrad API."""
+        values = np.asarray(kick, dtype=float)
+        if values.shape != (2,):
+            raise ValueError("ATF DR corrector kick must contain [theta_x, theta_y]")
+        element.set_kick(self._p_over_q, *(RFTRACK_MRAD_PER_RAD * values))
+
     def get_skew_corrector_names(self) -> tuple[str, ...]:
         """Return the thin SD1R/SF1R skew-K1L actuators in lattice order."""
         return tuple(
@@ -452,6 +532,8 @@ class ATFDRRingCorrection:
         corrector_names: Sequence[str] | None = None,
         bpm_names: Sequence[str] | None = None,
         perturbation: float = 1e-5,
+        initial_coordinates: Sequence[float] | None = None,
+        central_difference: bool = True,
     ) -> OrbitResponseResult:
         """Build a periodic COD response matrix by central differences."""
         plane_index = self._plane_index(plane)
@@ -465,47 +547,59 @@ class ATFDRRingCorrection:
         if not names:
             raise ValueError("No correctors selected")
 
-        baseline = self.find_closed_orbit(bpm_names=bpm_names)
-        original_strengths: dict[str, np.ndarray] = {}
+        baseline = self.find_closed_orbit(
+            bpm_names=bpm_names,
+            initial_coordinates=initial_coordinates,
+            max_iterations=30 if initial_coordinates is not None else 8,
+        )
+        original_kicks: dict[str, np.ndarray] = {}
         for name in names:
             element = self._single_element(name)
             if name not in self.get_corrector_names(plane):
                 raise ValueError(f"{name} is not a {plane}-plane ATF DR corrector")
-            original_strengths[name] = np.asarray(
-                element.get_strength(), dtype=float
-            ).copy()
+            original_kicks[name] = self._get_corrector_kick(element).copy()
 
         matrix = np.empty((len(baseline.bpm_names), len(names)), dtype=float)
         try:
             for column, name in enumerate(names):
                 element = self._single_element(name)
-                strength = original_strengths[name]
-                plus_strength = strength.copy()
-                minus_strength = strength.copy()
-                plus_strength[plane_index] += self.actuator_scale * perturbation
-                minus_strength[plane_index] -= self.actuator_scale * perturbation
+                kick = original_kicks[name]
+                plus_kick = kick.copy()
+                plus_kick[plane_index] += self.actuator_scale * perturbation
 
-                element.set_strength(*plus_strength)
+                self._set_corrector_kick(element, plus_kick)
                 plus = self.find_closed_orbit(
                     initial_coordinates=baseline.initial_coordinates,
                     bpm_names=baseline.bpm_names,
+                    max_iterations=30 if initial_coordinates is not None else 8,
                 )
-                element.set_strength(*minus_strength)
-                minus = self.find_closed_orbit(
-                    initial_coordinates=baseline.initial_coordinates,
-                    bpm_names=baseline.bpm_names,
-                )
-                element.set_strength(*strength)
-                matrix[:, column] = (
-                    plus.bpm_positions[:, plane_index]
-                    - minus.bpm_positions[:, plane_index]
-                ) / (2.0 * perturbation)
+                if central_difference:
+                    minus_kick = kick.copy()
+                    minus_kick[plane_index] -= self.actuator_scale * perturbation
+                    self._set_corrector_kick(element, minus_kick)
+                    minus = self.find_closed_orbit(
+                        initial_coordinates=baseline.initial_coordinates,
+                        bpm_names=baseline.bpm_names,
+                        max_iterations=30 if initial_coordinates is not None else 8,
+                    )
+                self._set_corrector_kick(element, kick)
+                if central_difference:
+                    matrix[:, column] = (
+                        plus.bpm_positions[:, plane_index]
+                        - minus.bpm_positions[:, plane_index]
+                    ) / (2.0 * perturbation)
+                else:
+                    matrix[:, column] = (
+                        plus.bpm_positions[:, plane_index]
+                        - baseline.bpm_positions[:, plane_index]
+                    ) / perturbation
         finally:
-            for name, strength in original_strengths.items():
-                self._single_element(name).set_strength(*strength)
+            for name, kick in original_kicks.items():
+                self._set_corrector_kick(self._single_element(name), kick)
             self.find_closed_orbit(
                 initial_coordinates=baseline.initial_coordinates,
                 bpm_names=baseline.bpm_names,
+                max_iterations=30 if initial_coordinates is not None else 8,
             )
 
         return OrbitResponseResult(
@@ -547,14 +641,12 @@ class ATFDRRingCorrection:
             bpm_names=baseline_orbit.bpm_names,
         )
         allowed_names = self.get_corrector_names(plane)
-        original_strengths: dict[str, np.ndarray] = {}
+        original_kicks: dict[str, np.ndarray] = {}
         for name in names:
             element = self._single_element(name)
             if name not in allowed_names:
                 raise ValueError(f"{name} is not a {plane}-plane ATF DR corrector")
-            original_strengths[name] = np.asarray(
-                element.get_strength(), dtype=float
-            ).copy()
+            original_kicks[name] = self._get_corrector_kick(element).copy()
 
         dispersion_matrix = np.empty(
             (len(baseline_orbit.bpm_names), len(names)), dtype=float
@@ -563,13 +655,13 @@ class ATFDRRingCorrection:
         try:
             for column, name in enumerate(names):
                 element = self._single_element(name)
-                strength = original_strengths[name]
-                plus_strength = strength.copy()
-                minus_strength = strength.copy()
-                plus_strength[plane_index] += self.actuator_scale * perturbation
-                minus_strength[plane_index] -= self.actuator_scale * perturbation
+                kick = original_kicks[name]
+                plus_kick = kick.copy()
+                minus_kick = kick.copy()
+                plus_kick[plane_index] += self.actuator_scale * perturbation
+                minus_kick[plane_index] -= self.actuator_scale * perturbation
 
-                element.set_strength(*plus_strength)
+                self._set_corrector_kick(element, plus_kick)
                 plus_orbit = self.find_closed_orbit(
                     initial_coordinates=baseline_orbit.initial_coordinates,
                     bpm_names=baseline_orbit.bpm_names,
@@ -579,7 +671,7 @@ class ATFDRRingCorrection:
                     bpm_names=baseline_orbit.bpm_names,
                 )
 
-                element.set_strength(*minus_strength)
+                self._set_corrector_kick(element, minus_kick)
                 minus_orbit = self.find_closed_orbit(
                     initial_coordinates=baseline_orbit.initial_coordinates,
                     bpm_names=baseline_orbit.bpm_names,
@@ -588,7 +680,7 @@ class ATFDRRingCorrection:
                     relative_momentum_step=relative_momentum_step,
                     bpm_names=baseline_orbit.bpm_names,
                 )
-                element.set_strength(*strength)
+                self._set_corrector_kick(element, kick)
 
                 dispersion_matrix[:, column] = (
                     plus_dispersion.values[:, plane_index]
@@ -599,8 +691,8 @@ class ATFDRRingCorrection:
                     - minus_orbit.bpm_positions[:, plane_index]
                 ) / (2.0 * perturbation)
         finally:
-            for name, strength in original_strengths.items():
-                self._single_element(name).set_strength(*strength)
+            for name, kick in original_kicks.items():
+                self._set_corrector_kick(self._single_element(name), kick)
             self.find_closed_orbit(
                 initial_coordinates=baseline_orbit.initial_coordinates,
                 bpm_names=baseline_orbit.bpm_names,
@@ -642,36 +734,35 @@ class ATFDRRingCorrection:
             initial_coordinates=initial_coordinates,
             bpm_names=bpm_names,
         )
-        original_strengths = {
-            name: np.asarray(self._single_element(name).get_strength(), dtype=float)
-            .copy()
+        original_kicks = {
+            name: self._get_corrector_kick(self._single_element(name)).copy()
             for name in names
         }
         signal = np.empty((len(names), len(baseline.bpm_names)), dtype=float)
         try:
             for index, name in enumerate(names):
                 element = self._single_element(name)
-                strength = original_strengths[name]
-                plus_strength = strength.copy()
-                minus_strength = strength.copy()
-                plus_strength[0] += self.actuator_scale * probe_perturbation
-                minus_strength[0] -= self.actuator_scale * probe_perturbation
+                kick = original_kicks[name]
+                plus_kick = kick.copy()
+                minus_kick = kick.copy()
+                plus_kick[0] += self.actuator_scale * probe_perturbation
+                minus_kick[0] -= self.actuator_scale * probe_perturbation
 
-                element.set_strength(*plus_strength)
+                self._set_corrector_kick(element, plus_kick)
                 plus = self.find_closed_orbit(
                     initial_coordinates=baseline.initial_coordinates,
                     bpm_names=baseline.bpm_names,
                 )
-                element.set_strength(*minus_strength)
+                self._set_corrector_kick(element, minus_kick)
                 minus = self.find_closed_orbit(
                     initial_coordinates=baseline.initial_coordinates,
                     bpm_names=baseline.bpm_names,
                 )
                 signal[index] = (plus.y - minus.y) / (2.0 * probe_perturbation)
-                element.set_strength(*strength)
+                self._set_corrector_kick(element, kick)
         finally:
-            for name, strength in original_strengths.items():
-                self._single_element(name).set_strength(*strength)
+            for name, kick in original_kicks.items():
+                self._set_corrector_kick(self._single_element(name), kick)
             self.find_closed_orbit(
                 initial_coordinates=baseline.initial_coordinates,
                 bpm_names=baseline.bpm_names,
@@ -1108,9 +1199,9 @@ class ATFDRRingCorrection:
             if delta == 0.0:
                 continue
             element = self._single_element(name)
-            strength = np.asarray(element.get_strength(), dtype=float)
-            strength[plane_index] += self.actuator_scale * float(delta)
-            element.set_strength(*strength)
+            kick = self._get_corrector_kick(element)
+            kick[plane_index] += self.actuator_scale * float(delta)
+            self._set_corrector_kick(element, kick)
         return self.find_closed_orbit(bpm_names=correction.bpm_names)
 
     def apply_coupling_correction(
@@ -1147,9 +1238,9 @@ class ATFDRRingCorrection:
             if delta == 0.0:
                 continue
             element = self._single_element(name)
-            strength = np.asarray(element.get_strength(), dtype=float)
-            strength[plane_index] += self.actuator_scale * float(delta)
-            element.set_strength(*strength)
+            kick = self._get_corrector_kick(element)
+            kick[plane_index] += self.actuator_scale * float(delta)
+            self._set_corrector_kick(element, kick)
         orbit = self.find_closed_orbit(bpm_names=correction.bpm_names)
         dispersion = self.measure_dispersion(
             relative_momentum_step=correction.relative_momentum_step,

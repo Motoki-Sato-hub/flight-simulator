@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
-"""Generate the checked-in RF-Track DR lattice data from a SAD daihon.
+"""Generate RF-Track DR lattice data from a SAD daihon.
 
 The generator intentionally understands only the small SAD syntax subset used
-by ``atfdr-design-20111111b.sad``.  It does not execute SAD.
+by the ATF DR daihon files.  It does not execute SAD.
 """
 
 from __future__ import annotations
 
 import argparse
+import ast
 import hashlib
 import json
 from pathlib import Path
@@ -26,9 +27,46 @@ def _without_comments(source: str) -> str:
 
 
 def _parse_attributes(body: str) -> dict[str, float]:
+    """Read numeric SAD attributes, including simple literal arithmetic.
+
+    Historical ATF daihons occasionally express a drift length as e.g.
+    ``L=2.2 - 1.06933``.  Treating that as ``2.2`` changes the ring
+    circumference and RF harmonic number, so only literal ``+ - * /``
+    expressions are evaluated here; names and SAD functions remain rejected.
+    """
+    def evaluate(expression: str) -> float:
+        literal = re.sub(r"\s+(?:DEG|RAD)\s*$", "", expression.strip(), flags=re.I)
+        tree = ast.parse(literal, mode="eval")
+
+        def visit(node):
+            if isinstance(node, ast.Expression):
+                return visit(node.body)
+            if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+                return float(node.value)
+            if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
+                value = visit(node.operand)
+                return value if isinstance(node.op, ast.UAdd) else -value
+            if isinstance(node, ast.BinOp) and isinstance(
+                node.op, (ast.Add, ast.Sub, ast.Mult, ast.Div)
+            ):
+                left, right = visit(node.left), visit(node.right)
+                if isinstance(node.op, ast.Add):
+                    return left + right
+                if isinstance(node.op, ast.Sub):
+                    return left - right
+                if isinstance(node.op, ast.Mult):
+                    return left * right
+                return left / right
+            raise ValueError(f"Unsupported SAD numeric expression: {expression!r}")
+
+        return float(visit(tree))
+
     names = "|".join(ATTRIBUTE_NAMES)
-    pattern = rf"\b({names})\s*=\s*([+\-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[Ee][+\-]?\d+)?)"
-    return {name: float(value) for name, value in re.findall(pattern, body, re.I)}
+    pattern = rf"\b({names})\s*=\s*(.*?)(?=\s+[A-Za-z_][A-Za-z0-9_]*\s*=|$)"
+    return {
+        name.upper(): evaluate(value)
+        for name, value in re.findall(pattern, body, re.I | re.S)
+    }
 
 
 def parse_sad_daihon(path: Path) -> dict[str, object]:
@@ -74,8 +112,8 @@ def parse_sad_daihon(path: Path) -> dict[str, object]:
     )
     return {
         "metadata": {
-            "reference_sad_daihon": REFERENCE_SAD_DAIHON,
-            "reference_sad_relative_path": REFERENCE_SAD_RELATIVE_PATH,
+            "reference_sad_daihon": path.name,
+            "reference_sad_relative_path": str(path),
             "source_sha256": hashlib.sha256(raw).hexdigest(),
             "ring_line": "RING0",
             "circumference_m": circumference,
@@ -96,10 +134,6 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    if args.sad_daihon.name != REFERENCE_SAD_DAIHON:
-        raise ValueError(
-            f"Expected {REFERENCE_SAD_DAIHON}, got {args.sad_daihon.name}"
-        )
     data = parse_sad_daihon(args.sad_daihon)
     args.output.write_text(
         json.dumps(data, indent=2, sort_keys=True) + "\n",

@@ -154,6 +154,27 @@ INTERFACE_SETUP = {
                 "alpha_y0": [-15.0, 2.0],
             }
         },
+        {
+            "display_name": "ATF2 Beam Transport RFTrack (SAD, 1.3 GeV)",
+            "module": "Interfaces.ATF2.InterfaceATF2_BT_RFTrack",
+            "class_name": "InterfaceATF2_BT_RFTrack",
+            "clock_timezone": "Asia/Tokyo",
+            "settings": {"jitter": 0.00, "bpm_resolution": 0.00, "nsamples": 1, "momentum_mev_c": 1300.0},
+            "units":
+                {
+                    "corrector_strength": "T*mm",
+                    "bpm_position": "mm",
+                    "sysid_corrector_kick": 0.01
+                },
+            "bounds": {
+                "emit_x_norm": [1e-4, 10.0],
+                "beta_x0": [0.05, 60.0],
+                "alpha_x0": [-15.0, 15.0],
+                "emit_y_norm": [1e-4, 10.0],
+                "beta_y0": [0.05, 60.0],
+                "alpha_y0": [-15.0, 15.0],
+            }
+        },
     ],
 
     "FACET2": [
