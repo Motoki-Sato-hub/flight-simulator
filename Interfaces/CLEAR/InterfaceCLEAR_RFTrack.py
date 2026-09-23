@@ -17,14 +17,22 @@ class InterfaceCLEAR_RFTrack(AbstractMachineInterface):
         G_0 = I * self.get_ITF(I) / Lquad  # T/m
         return G_0
 
-    def get_Quad_K(self, G_0, Pref):
-        K = 299.8 * G_0 / Pref  # 1/m^2
-        return K
+    @staticmethod
+    def _gradient_sign(quadrupole_name):
+        if "QFD" in quadrupole_name:
+            return -1.0
+        if "QDD" in quadrupole_name:
+            return 1.0
 
-    def get_Quad_K_from_I(self, I, Lquad, Pref):
-        G_0 = self.get_grad(I, Lquad)
-        K = self.get_Quad_K(G_0, Pref)
-        return K # 1/m^2
+    def get_current_from_grad(self, gradient, Lquad=0.226):
+        integrated_gradient = float(gradient) * float(Lquad)
+        a = float(self.get_ITF(0.0))
+        b = float(a - self.get_ITF(1.0))
+        if np.isclose(b, 0.0):
+            return integrated_gradient / a
+        discriminant = a * a - 4.0 * b * integrated_gradient
+        if discriminant < 0.0: raise ValueError(f"Gradient {gradient:.6g} T/m is outside the calibration range")
+        return float((a - np.sqrt(discriminant)) / (2.0 * b))
 
     @staticmethod
     def _replace_btv_monitors_with_screens(lattice):
@@ -37,9 +45,9 @@ class InterfaceCLEAR_RFTrack(AbstractMachineInterface):
             screen.set_name(element.get_name())
             screen.set_length(element.get_length())
             element.replace_with(screen)
-
-    def __init__(self, population=300 * rft.pC, jitter=0.0, bpm_resolution=0.0, nsamples=1, nparticles=10000):
-        self.sigmaCut = 2.0
+                                                                                                # 1_000_000
+    def __init__(self, population=300 * rft.pC, jitter=0.0, bpm_resolution=0.0, nsamples=1, nparticles=1000):
+        self.sigmaCut = 4.0
         self.Pref = 198 # MeV/c
         self.Q=-1
         self.population = population
@@ -72,15 +80,15 @@ class InterfaceCLEAR_RFTrack(AbstractMachineInterface):
         self.quadrupoles = [element.get_name() for element in self.lattice.get_quadrupoles()]
         self.sextupoles = []
         self.__setup_beam0()
+        self.lattice.align_elements()
         '''Uncomment lines below to scatter elements in the lattice.'''
-        self.lattice.scatter_elements('bpm', 0.100, 0.100, 0, 0, 0, 0, 'center')
-        self.lattice.scatter_elements('quadrupole', 0.100, 0.100, 0, 0, 0, 0, 'center')
+        # self.lattice.scatter_elements('bpm', 0.100, 0.100, 0, 0, 0, 0, 'center')
+        # self.lattice.scatter_elements('quadrupole', 0.100, 0.100, 0, 0, 0, 0, 'center')
         self.freq=2.997e9
         self.nr_quad=11
         self.Lquad=0.226 #magnetic length of the quadrupole in [m]
         self.nominal_K=0.7752883624676146 #3.35  # 1/m
         self.machine_name = "CLEAR"
-        self.lattice.align_elements()
         self.chosen_ict = "CA.BPM0890"
         # qfd520 = self.lattice["CA.QFD0520"]
         #                     # dx   # dy   #dz  # roll  # pitch # yaw
@@ -91,8 +99,6 @@ class InterfaceCLEAR_RFTrack(AbstractMachineInterface):
 
         '''test of bpm invertion'''
         self.invert_bpm = True
-
-
         self.__track_bunch()
 
     def __setup_beam0(self):
@@ -105,10 +111,10 @@ class InterfaceCLEAR_RFTrack(AbstractMachineInterface):
         T.alpha_y = 7.2462
 
         T.sigma_t = 0#10*rft.ps # mm/c
-        T.sigma_pt = 0#10 # permille
+        T.sigma_pt = 30#10 # permille
         T.mean_xp = 0.0
         T.mean_yp = 0.0
-        sigmaCut = 2.0
+        sigmaCut = 5.0
         self.P0 = rft.Bunch6d_QR(rft.electronmass, self.population, 1, self.Pref, T, self.nparticles, sigmaCut) # reference particle
         self.B0 = rft.Bunch6d_QR(rft.electronmass, self.population, self.Q, self.Pref, T, self.nparticles, sigmaCut) # reference bunch
         self.dfs_test_energy = 0.90 #0.963
@@ -153,8 +159,32 @@ class InterfaceCLEAR_RFTrack(AbstractMachineInterface):
         self.B0 = rft.Bunch6d_QR(rft.electronmass, population, self.Q, self.Pref, T, self.nparticles, self.sigmaCut)
         self.P0 = rft.Bunch6d_QR(rft.electronmass, population,  1, self.Pref, T, self.nparticles, self.sigmaCut)
 
+    def match_screen_name(self, name, candidates):
+        name = str(name)
+        candidates = [str(candidate) for candidate in candidates]
+        matched = super().match_screen_name(name, candidates)
+        if matched is not None:
+            return matched
+        stripped = name.rstrip("LH")
+        for candidate in candidates:
+            if candidate.rstrip("LH") == stripped:
+                return candidate
+        return None
+
+    def _model_screen_names(self, screens):
+        if screens is None:
+            return None
+        single = isinstance(screens, str)
+        names = [screens] if single else list(screens)
+        mapped = []
+        for name in names:
+            name = str(name)
+            mapped.append(name if name in self.screens else name.rstrip("LH"))
+        return mapped[0] if single else mapped
+
     def get_screens(self, names=None):
         if isinstance(names, str): names = [names]
+        names = self._model_screen_names(names)
         hpixel = 0.001
         vpixel = 0.001
         selected_screens = [screen for screen in self.screens if names is None or screen in names]
@@ -219,6 +249,32 @@ class InterfaceCLEAR_RFTrack(AbstractMachineInterface):
         }
 
         return screens
+
+    def get_emittance_at_screens(self, names=None):
+        if isinstance(names, str): names = [names]
+        names = self._model_screen_names(names)
+        selected_screens = [screen for screen in self.screens if names is None or screen in names]
+        fields = ("emitt_x", "emitt_y", "beta_x", "beta_y", "alpha_x", "alpha_y", "sigma_x", "sigma_y")
+        screen_names = []
+        s_list = []
+        values = {field: [] for field in fields}
+
+        for screen_name in selected_screens:
+            screen = self.lattice[screen_name]
+            if isinstance(screen, list):
+                screen = screen[-1]
+            bunch = screen.get_bunch()
+            if bunch is None:
+                continue
+            info = bunch.get_info()
+            screen_names.append(screen_name)
+            s_list.append(float(screen.get_S("entrance")))
+            for field in fields:
+                values[field].append(float(getattr(info, field, np.nan)))
+
+        emittance = {"names": screen_names, "S": np.array(s_list, dtype=float)}
+        emittance.update({field: np.array(values[field], dtype=float) for field in fields})
+        return emittance
 
     def __track_bunch(self):
         I0 = self.B0.get_info()
@@ -385,7 +441,7 @@ class InterfaceCLEAR_RFTrack(AbstractMachineInterface):
                 c.vary_strength(0.0, val / 10)
         self.__track_bunch()
 
-    def _build_bunch_from_guesses(self, emit_x, emit_y, beta_x0, beta_y0, alpha_x0, alpha_y0):
+    def _build_bunch_from_guesses(self, emit_x, emit_y, beta_x0, beta_y0, alpha_x0, alpha_y0, energy_pref=None):
         T = rft.Bunch6d_twiss()
         T.emitt_x = float(emit_x)
         T.emitt_y = float(emit_y)
@@ -397,7 +453,8 @@ class InterfaceCLEAR_RFTrack(AbstractMachineInterface):
         T.sigma_pt = 0#10 # permille
         T.mean_xp = 0.0
         T.mean_yp = 0.0
-        return rft.Bunch6d_QR(rft.electronmass, self.population, self.Q, self.Pref, T, self.nparticles, self.sigmaCut)
+        Pref = self.Pref if energy_pref is None else float(energy_pref)
+        return rft.Bunch6d_QR(rft.electronmass, self.population, self.Q, Pref, T, self.nparticles, self.sigmaCut)
 
     def _read_tracked_bunch_screen_sigmas(self, screens):
         screen_data = self.get_screens(names=screens)
@@ -479,7 +536,9 @@ class InterfaceCLEAR_RFTrack(AbstractMachineInterface):
 
         return output_x, output_y
 
-    def _predict_scan_response_full(self, quad_name, screens, K1L_values, emit_x, emit_y, beta_x0, beta_y0, alpha_x0, alpha_y0, quad_dx0=None, quad_dy0=None, quad_roll=None, stop_checker=None, reference_screen=None):
+    def _predict_scan_response_full(self, quad_name, screens, K1L_values, emit_x, emit_y, beta_x0, beta_y0, alpha_x0, alpha_y0, quad_dx0=None, quad_dy0=None, quad_roll=None, energy_pref=None, with_twiss=False, stop_checker=None, reference_screen=None):
+        screens = self._model_screen_names(screens)
+        reference_screen = self._model_screen_names(reference_screen)
         screens = list(screens)
         K1L_values = np.asarray(K1L_values, dtype=float)
         if reference_screen is None: reference_screen = screens[0]
@@ -501,6 +560,9 @@ class InterfaceCLEAR_RFTrack(AbstractMachineInterface):
         x_mean = np.full((nK1L, nscreens), np.nan, dtype=float)
         y_mean = np.full((nK1L, nscreens), np.nan, dtype=float)
         sigma_xy = np.full((nK1L, nscreens), np.nan, dtype=float)
+        particles_xy = np.empty((nK1L, nscreens), dtype=object)
+        twiss_fields = ("emitt_x", "emitt_y", "beta_x", "beta_y", "alpha_x", "alpha_y")
+        twiss = {field: np.full((nK1L, nscreens), np.nan, dtype=float) for field in twiss_fields} if with_twiss else {}
 
         try:
             if override_offsets:
@@ -514,7 +576,7 @@ class InterfaceCLEAR_RFTrack(AbstractMachineInterface):
                 if isinstance(end_element, list):
                     end_element = end_element[-1]
 
-                temp_bunch = self._build_bunch_from_guesses(emit_x=float(emit_x), emit_y=float(emit_y), beta_x0=float(beta_x0), beta_y0=float(beta_y0), alpha_x0=float(alpha_x0), alpha_y0=float(alpha_y0))
+                temp_bunch = self._build_bunch_from_guesses(emit_x=float(emit_x), emit_y=float(emit_y), beta_x0=float(beta_x0), beta_y0=float(beta_y0), alpha_x0=float(alpha_x0), alpha_y0=float(alpha_y0), energy_pref=energy_pref)
                 lattice_view = rft.Lattice_view(self.lattice, start_element, end_element)
                 tracked_to_last_screen = lattice_view.track(temp_bunch)
 
@@ -526,6 +588,7 @@ class InterfaceCLEAR_RFTrack(AbstractMachineInterface):
                     if bunch_at_screen is None and str(screen_name) == end_element_name:
                         bunch_at_screen = tracked_to_last_screen
                     m = bunch_at_screen.get_phase_space('%x %y')
+                    particles_xy[k, si] = (m[:, 0].copy(), m[:, 1].copy())
                     if m is not None and len(m) > 0:
                         xs = m[:, 0]
                         ys = m[:, 1]
@@ -536,6 +599,10 @@ class InterfaceCLEAR_RFTrack(AbstractMachineInterface):
                         x_mean[k, si] = xm
                         y_mean[k, si] = ym
                         sigma_xy[k, si] = float(np.mean((xs - xm) * (ys - ym))) # covariance
+                        if with_twiss:
+                            info = bunch_at_screen.get_info()
+                            for field in twiss_fields:
+                                twiss[field][k, si] = float(getattr(info, field, np.nan))
 
         finally:
             self.lattice = lattice_reference
@@ -545,18 +612,21 @@ class InterfaceCLEAR_RFTrack(AbstractMachineInterface):
         return {
             "sigma_x": sigma_x, "sigma_y": sigma_y,
             "x_mean": x_mean, "y_mean": y_mean,
-            "sigma_xy": sigma_xy,
+            "sigma_xy": sigma_xy, "particles_xy": particles_xy,
+            **twiss,
         }
 
     def predict_emittance_scan_response(self, quad_name, screens, K1L_values, emit_x, emit_y, beta_x0, beta_y0, alpha_x0, alpha_y0, stop_checker = None, reference_screen = None):
         full = self._predict_scan_response_full(quad_name, screens, K1L_values, emit_x, emit_y, beta_x0, beta_y0, alpha_x0, alpha_y0, stop_checker=stop_checker, reference_screen=reference_screen)
         return full["sigma_x"], full["sigma_y"]
 
-    def predict_emittance_scan_response_full(self, quad_name, screens, K1L_values, emit_x, emit_y, beta_x0, beta_y0, alpha_x0, alpha_y0, quad_dx0=None, quad_dy0=None, quad_roll=None, stop_checker=None, reference_screen=None):
-        return self._predict_scan_response_full(quad_name, screens, K1L_values, emit_x, emit_y, beta_x0, beta_y0, alpha_x0, alpha_y0, quad_dx0=quad_dx0, quad_dy0=quad_dy0, quad_roll=quad_roll, stop_checker=stop_checker, reference_screen=reference_screen)
+    def predict_emittance_scan_response_full(self, quad_name, screens, K1L_values, emit_x, emit_y, beta_x0, beta_y0, alpha_x0, alpha_y0, quad_dx0=None, quad_dy0=None, quad_roll=None, energy_pref=None, with_twiss=False, stop_checker=None, reference_screen=None):
+        return self._predict_scan_response_full(quad_name, screens, K1L_values, emit_x, emit_y, beta_x0, beta_y0, alpha_x0, alpha_y0, quad_dx0=quad_dx0, quad_dy0=quad_dy0, quad_roll=quad_roll, energy_pref=energy_pref, with_twiss=with_twiss, stop_checker=stop_checker, reference_screen=reference_screen)
 
 
     def get_phase_space_transport_to_screens(self, reference_screen=None, screens=None):
+        screens = self._model_screen_names(screens)
+        reference_screen = self._model_screen_names(reference_screen)
         if screens is None:
             screens = list(self.screens)
         if isinstance(screens, str):
@@ -646,6 +716,7 @@ class InterfaceCLEAR_RFTrack(AbstractMachineInterface):
         return result
 
     def get_R_matrix_scan(self, quad_name, screens, K1L_values):
+        screens = self._model_screen_names(screens)
         screens = list(screens)
         K1L_values = np.asarray(K1L_values, dtype=float)
         original_quads = self.get_quadrupoles(names=[quad_name])
@@ -732,21 +803,26 @@ class InterfaceCLEAR_RFTrack(AbstractMachineInterface):
             if not isinstance(elements, list):
                 elements = [elements]
 
-            k1l_values = []
+            current_values = []
             for element in elements:
                 try:
-                    strength = element.get_K1L(self.Pref / self.Q)
+                    gradient = float(element.get_gradient())
+                    current = self.get_current_from_grad(
+                        self._gradient_sign(quadrupole_name) * gradient,
+                        element.get_length(),
+                    )
                 except Exception:
                     continue
-                if isinstance(strength, (list, tuple, np.ndarray)):
-                    if len(strength) > 0:
-                        k1l_values.append(float(strength[0]))
-                else:
-                    k1l_values.append(float(strength))
+                current_values.append(current)
 
-            bdes[i] = k1l_values[0] if k1l_values else 0.0
+            bdes[i] = current_values[0] if current_values else 0.0
 
-        quadrupoles = {"names": self.quadrupoles, "bdes": bdes, "bact": bdes.copy()}
+        quadrupoles = {
+            "names": self.quadrupoles,
+            "bdes": bdes,
+            "bact": bdes.copy(),
+            "value_unit": "A",
+        }
 
         if isinstance(names, str):
             names = [names]
@@ -756,6 +832,7 @@ class InterfaceCLEAR_RFTrack(AbstractMachineInterface):
                 "names": [quadrupoles["names"][i] for i in idx],
                 "bdes": np.asarray(quadrupoles["bdes"])[idx],
                 "bact": np.asarray(quadrupoles["bact"])[idx],
+                "value_unit": "A",
             }
 
         return quadrupoles
@@ -774,16 +851,23 @@ class InterfaceCLEAR_RFTrack(AbstractMachineInterface):
         start_quad_element_name = quad_selected
         return start_quad_element_name
 
-    def set_quadrupoles(self, names, values_range, track=True):
+    def set_quadrupoles(self, names, currents_A, track=True):
         if isinstance(names, str):
             names = [names]
-        if not (isinstance(values_range, (list, tuple, np.ndarray))):
-            values_range = [values_range]
-        for quadrupole_name, value in zip(names, values_range):
+        if not isinstance(currents_A, (list, tuple, np.ndarray)):
+            currents_A = [currents_A]
+        if len(names) != len(currents_A):
+            raise ValueError(f"len(names)={len(names)} != len(currents_A)={len(currents_A)}")
+
+        for quadrupole_name, current_A in zip(names, currents_A):
             elements = self.lattice[quadrupole_name]
-            if not isinstance(elements, (list)): elements = [elements]
+            if not isinstance(elements, list):
+                elements = [elements]
             for element in elements:
-                element.set_K1L(self.Pref / self.Q,float(value))
+                gradient = self._gradient_sign(quadrupole_name) * self.get_grad(
+                    float(current_A), element.get_length()
+                )
+                element.set_gradient(gradient)
         if track:
             self.__track_bunch()
 

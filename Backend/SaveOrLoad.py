@@ -1,4 +1,4 @@
-import os, pickle, json
+import os, pickle, json, re
 from datetime import datetime
 try:
     from PyQt6.QtWidgets import (
@@ -14,6 +14,10 @@ except ImportError:
     from PyQt5.QtCore import QEvent, Qt
 import numpy as np
 from Backend.State import State
+
+
+def _match_exactly():
+    return Qt.MatchFlag.MatchExactly if hasattr(Qt, "MatchFlag") else Qt.MatchExactly
 
 class SaveOrLoad():
 
@@ -91,7 +95,7 @@ class SaveOrLoad():
                     selected = [elements_list.item(i).text() for i in range(elements_list.count())]
         elements_list.clearSelection()
         for name in selected:
-            for it in elements_list.findItems(name, Qt.MatchFlag.MatchExactly):
+            for it in elements_list.findItems(name, _match_exactly()):
                 it.setSelected(True)
 
     def _load_correctors(self):
@@ -153,8 +157,11 @@ class SaveOrLoad():
         sextupoles = state.get_sextupoles()
         self.log("Sextupoles restored!")
         self.log("Restoring correctors' strengths from machine status...")
-        self.interface.restore_correctors_state(state)
-        self.log("Correctors restored!")
+        if self.interface.restore_correctors_state(state) is False:
+            self.log("Warning: not every corrector was set at its saved current.")
+            QMessageBox.warning(self, "Restore machine status", "Not every corrector was set back at its saved current. Check them on the machine.")
+        else:
+            self.log("Correctors restored!")
         self.log("Restoring quadrupoles' state from machine status...")
         self.interface.restore_quadrupoles_state(state)
         self.log("Quadrupoles restored!")
@@ -196,6 +203,8 @@ class SaveOrLoad():
         correction_settings = {
             "saved_at": saved_at.isoformat(timespec="seconds"),
             "timezone": getattr(self, "_clock_zone_name", None),
+            "nsamples": int(self.interface.nsamples),
+            "beam_change_values": getattr(self, "_beam_change_values", {}),
             "actuator_mode": "Kicker",
             "w1": w1,
             "w2": w2,
@@ -258,7 +267,7 @@ class SaveOrLoad():
         if not saved_states_dir:
             return None
         saved_states_dir = os.path.normpath(os.path.expanduser(os.path.expandvars(str(saved_states_dir))))
-        if saved_states_dir != states_dir:
+        if saved_states_dir != states_dir and os.path.basename(saved_states_dir) != os.path.basename(states_dir):
             return None
         return settings
 
@@ -270,42 +279,48 @@ class SaveOrLoad():
             folder = QFileDialog.getExistingDirectory(self, "Select database", default_dir)
             if not folder:
                 return
-        else:
-            folder = folder
-        self.load_screens_data_database.setText(folder)
+        folder = os.path.abspath(os.path.expanduser(os.path.expandvars(str(folder))))
+        if not os.path.isdir(folder):
+            QMessageBox.warning(self, "Load session", "Selected data directory does not exist.")
+            return
         quad_selected = None
         screens = []
         folder_base_name = os.path.basename(os.path.normpath(folder))
-        if folder_base_name.startswith("states_"):
-            quad_selected = folder_base_name.removeprefix("states_").split("_")[0]
+        state_file_pattern = re.compile(r"screen_(\d+)_step_(\d+)_shot_(\d+)\.pkl")
+
+        if folder_base_name.startswith(("states_", "screens_data_")) or any(state_file_pattern.fullmatch(name) for name in os.listdir(folder)):
+            state_folder_path = folder
         else:
-            quad_selected = None
+            states_folders = [name for name in sorted(os.listdir(folder)) if name.startswith(("states_", "screens_data_")) and os.path.isdir(os.path.join(folder, name))]
+            if not states_folders:
+                QMessageBox.information(self, "Load session", "No states or screen data folder found.")
+                return
+            state_folder_path = os.path.join(folder, states_folders[0])
+
+        self.load_screens_data_database.setText(state_folder_path)
+        print(f"Loading scan data from {state_folder_path}")
+        state_folder_name = os.path.basename(os.path.normpath(state_folder_path))
+        saved_scan_settings = self._find_matching_emittance_settings(state_folder_path)
+        is_quad_scan = bool(saved_scan_settings.get("is_quad_scan", not state_folder_name.startswith("screens_data"))) if saved_scan_settings else not state_folder_name.startswith("screens_data")
+        if is_quad_scan and state_folder_name.startswith("states_"):
+            quad_selected = state_folder_name.removeprefix("states_").rsplit("_", 2)[0]
+        if is_quad_scan and saved_scan_settings:
+            quad_selected = saved_scan_settings.get("quad_name") or quad_selected
 
         self.quadrupoles_list.clearSelection()
         if quad_selected:
-            for it in self.quadrupoles_list.findItems(quad_selected, Qt.MatchFlag.MatchExactly):
+            for it in self.quadrupoles_list.findItems(quad_selected, _match_exactly()):
                 it.setSelected(True)
-        else:
-            for name in os.listdir(folder):
-                if name.startswith("states_"):
-                    quad_selected = name.removeprefix("states_")
-                    for it in self.quadrupoles_list.findItems(quad_selected, Qt.MatchFlag.MatchExactly):
-                        it.setSelected(True)
-                    break
-                else:
-                    self.quadrupoles_list.setEnabled(False)
-                    quad_selected = None
-
         state_files = []
-        state_folder_path = folder
         for filename in sorted(os.listdir(state_folder_path)):
-            if filename.endswith(".pkl"):
+            if state_file_pattern.fullmatch(filename):
                 state_files.append(os.path.join(state_folder_path, filename))
-        self.loaded_state_files = state_files
+        self.loaded_state_files = []
         self.loaded_states_from_scan = []
         for state_file in state_files:
             try:
                 self.loaded_states_from_scan.append(State(filename=state_file))
+                self.loaded_state_files.append(state_file)
             except Exception as e:
                 print(f"Couldn't load {state_file}, because {e}")
         print(f"Loaded {len(self.loaded_states_from_scan)} states")
@@ -322,9 +337,17 @@ class SaveOrLoad():
                 screens_by_index[screen_i] = str(state_screen_names[0])
 
         screens = [screens_by_index[index] for index in sorted(screens_by_index)]
+        add_missing_screens = getattr(self, "_add_missing_screens_to_list", None)
+        if callable(add_missing_screens):
+            add_missing_screens(screens)
         self.screens_list.clearSelection()
+        list_names = [str(self.screens_list.item(i).data(Qt.ItemDataRole.UserRole) or self.screens_list.item(i).text())
+                      for i in range(self.screens_list.count())]
         for screen in screens:
-            for it in self.screens_list.findItems(screen, Qt.MatchFlag.MatchExactly):
+            listed = self.interface.match_screen_name(screen, list_names)
+            if listed is None:
+                continue
+            for it in self.screens_list.findItems(listed, _match_exactly()):
                 it.setSelected(True)
         if quad_selected:
             self.quadrupoles_list.blockSignals(True)
@@ -339,9 +362,6 @@ class SaveOrLoad():
 
             self.quadrupoles_list.blockSignals(False)
             self._last_selected_quadrupoles = [quad_selected]
-
-        folder_name = os.path.basename(os.path.normpath(folder))
-        is_quad_scan = not folder_name.startswith("screens_data")
 
         read_filenames = []
         for path in self.loaded_state_files:
@@ -359,29 +379,39 @@ class SaveOrLoad():
         nscreens = max(screen_i for screen_i, step_i, shot_i in read_filenames)+1
 
 
+        screen_current_ranges = {}
         if is_quad_scan:
-            delta_min = float(self.delta_min_scan.value())
-            delta_max = float(self.delta_max_scan.value())
-            scan_steps = max(step_i for screen_i, step_i, shot_i in read_filenames)+1
-            saved_scan_settings = self._find_matching_emittance_settings(folder)
+            current_A_min = float(self.minimum_current.value())
+            current_A_max = float(self.maximum_current.value())
+            steps_per_screen = {}
+            for screen_i, step_i, shot_i in read_filenames:
+                steps_per_screen.setdefault(screen_i, set()).add(step_i)
+            scan_steps = max(len(indices) for indices in steps_per_screen.values())
             if saved_scan_settings:
-                if "delta_min" in saved_scan_settings:
-                    delta_min = float(saved_scan_settings["delta_min"])
-                if "delta_max" in saved_scan_settings:
-                    delta_max = float(saved_scan_settings["delta_max"])
-                self.delta_min_scan.setValue(delta_min)
-                self.delta_max_scan.setValue(delta_max)
+                if saved_scan_settings.get("scan_steps") is not None:
+                    scan_steps = int(saved_scan_settings["scan_steps"])
+                if saved_scan_settings.get("current_A_min") is not None:
+                    current_A_min = float(saved_scan_settings["current_A_min"])
+                if saved_scan_settings.get("current_A_max") is not None:
+                    current_A_max = float(saved_scan_settings["current_A_max"])
+                screen_current_ranges = dict(saved_scan_settings.get("screen_current_ranges") or {})
+                self.minimum_current.setValue(current_A_min)
+                self.maximum_current.setValue(current_A_max)
         else:
-            delta_min, delta_max, scan_steps = 0.0, 0.0, 0.0
+            current_A_min, current_A_max, scan_steps = 0.0, 0.0, 0.0
             quad_selected = None
 
-        print(f"Nshots: {nshots}, Scan steps: {scan_steps}")
+        self._screen_current_ranges = {str(screen): (float(values[0]), float(values[1])) for screen, values in screen_current_ranges.items()}
+        self._update_per_screen_ranges_button()
+
+        print(f"Nshots: {nshots}, Scan steps per screen: {scan_steps}")
 
         is_fit_quad_strength_checked = bool(self.fit_quadrupole_strength_checkbox.isChecked())
 
         self.emittance_settings = {
-            "delta_min": delta_min,
-            "delta_max": delta_max,
+            "current_A_min": current_A_min,
+            "current_A_max": current_A_max,
+            "screen_current_ranges": screen_current_ranges,
             "scan_steps": scan_steps,
             "nshots": nshots,
             "nscreens": nscreens,
@@ -391,6 +421,9 @@ class SaveOrLoad():
             "screens": screens if screens is not None else [],
             "quad_name": quad_selected if quad_selected else None,
         }
+
+        self.steps_settings.setValue(int(scan_steps))
+        self.meas_per_step.setValue(int(nshots))
 
         return self.loaded_states_from_scan
 
@@ -442,10 +475,13 @@ class SaveOrLoad():
             if "is_quad_scan" not in self.emittance_settings:
                 data_folder_name = os.path.basename(os.path.normpath(states_dir))
                 self.emittance_settings["is_quad_scan"] = not data_folder_name.startswith("screens_data")
-            if "delta_min" in self.emittance_settings:
-                self.delta_min_scan.setValue(float(self.emittance_settings["delta_min"]))
-            if "delta_max" in self.emittance_settings:
-                self.delta_max_scan.setValue(float(self.emittance_settings["delta_max"]))
+            if self.emittance_settings.get("current_A_min") is not None:
+                self.minimum_current.setValue(float(self.emittance_settings["current_A_min"]))
+            if self.emittance_settings.get("current_A_max") is not None:
+                self.maximum_current.setValue(float(self.emittance_settings["current_A_max"]))
+            if "screen_current_ranges" in self.emittance_settings:
+                self._screen_current_ranges = {str(screen): (float(values[0]), float(values[1])) for screen, values in dict(self.emittance_settings["screen_current_ranges"]).items()}
+                self._update_per_screen_ranges_button()
             if "scan_steps" in self.emittance_settings:
                 self.steps_settings.setValue(int(self.emittance_settings["scan_steps"]))
             if "nshots" in self.emittance_settings:
@@ -467,8 +503,9 @@ class SaveOrLoad():
             self._draw_live_scan(self.session)
             self._clear_fit_panel()
 
-            self.delta_min_scan.setEnabled(False)
-            self.delta_max_scan.setEnabled(False)
+            self.minimum_current.setEnabled(False)
+            self.maximum_current.setEnabled(False)
+            self.per_screen_ranges_button.setEnabled(False)
             self.steps_settings.setEnabled(False)
             self.meas_per_step.setEnabled(False)
             self.quadrupoles_list.setEnabled(False)
@@ -549,6 +586,10 @@ class SaveOrLoad():
         if "iters" in settings:  self.lineEdit_5.setText(str(settings["iters"]))
         if "gain" in settings: self.lineEdit_6.setText(str(settings["gain"]))
         if "beta" in settings: self.lineEdit_beta.setText(str(settings["beta"]))
+        if "nsamples" in settings and hasattr(self, "nsamples_input"):
+            self.nsamples_input.setText(str(settings["nsamples"]))
+        if settings.get("beam_change_values") and hasattr(self, "_load_beam_change_values"):
+            self._load_beam_change_values(settings["beam_change_values"])
         if "is_triangular" in settings: self.triangular_checkbox.setChecked(settings["is_triangular"])
         if "is_jitter_subtraction_checked" in settings: self.subtract_jitter_checkbox.setChecked(settings["is_jitter_subtraction_checked"])
         if "bpm_weights" in settings:
@@ -590,6 +631,9 @@ class SaveOrLoad():
     def save_emittance_measurement_session(self, session=None, is_fit_quad_strength_checked=None, bounds=None, target_dir=None):
         save_session_dir = target_dir or getattr(self, "dir_name", None) or self.session_directory.text()
         os.makedirs(save_session_dir, exist_ok=True)
+        preserve_status = getattr(self, "_preserve_quadrupole_status_files", None)
+        if callable(preserve_status):
+            preserve_status(save_session_dir)
         self.session_directory.setText(save_session_dir)
         self._saving_func(elements_list=self.quadrupoles_list, filename="quadrupoles.txt", saving_name="Save quadrupoles", use_dialog=False, base_dir=save_session_dir)
         self._saving_func(elements_list=self.screens_list, filename="screens.txt", saving_name="Save screens", use_dialog=False, base_dir=save_session_dir)
@@ -604,6 +648,10 @@ class SaveOrLoad():
         else:
             self.emittance_settings = {}
         self.emittance_settings.pop("ls_steps", None)
+        for status_key in ("quadrupoles_status", "model_quadrupoles_status"):
+            status = getattr(self, status_key, None)
+            if status is not None:
+                self.emittance_settings[status_key] = status
 
         if session is not None:
             state_files = []
@@ -611,8 +659,9 @@ class SaveOrLoad():
                 state_files.extend(step.get("state_files", []))
             state_files = list(dict.fromkeys(str(path) for path in state_files))
             self.emittance_settings.update({
-                "delta_min": session.get("delta_min"),
-                "delta_max": session.get("delta_max"),
+                "current_A_min": session.get("current_A_min"),
+                "current_A_max": session.get("current_A_max"),
+                "screen_current_ranges": session.get("screen_current_ranges", {}),
                 "scan_steps": session.get("steps"),
                 "nshots": session.get("nshots"),
                 "data_session": self.load_screens_data_database.text(),
@@ -625,6 +674,8 @@ class SaveOrLoad():
                 "reference_screen": session.get("reference_screen"),
                 "K1L_0": session.get("K1L_0"),
                 "K1L_values": session.get("K1L_values"),
+                "current_values": session.get("current_values"),
+                "quad_value_unit": session.get("quad_value_unit"),
                 "sigma_unit": session.get("sigma_unit", "mm"),
             })
 
@@ -687,9 +738,6 @@ class SaveOrLoad():
         __save_graph_data(os.path.join(save_session_dir, "trajectory_x_after_correction.txt"), self._hist_orbit_x)
         __save_graph_data(os.path.join(save_session_dir, "trajectory_y_after_correction.txt"), self._hist_orbit_y)
         __save_graph_data(os.path.join(save_session_dir, "trajectory_combined_after_correction.txt"), self._hist_orbit)
-        __save_graph_data(os.path.join(save_session_dir, "orbit_rms_x_after_correction.txt"), self._hist_abs_rms_x)
-        __save_graph_data(os.path.join(save_session_dir, "orbit_rms_y_after_correction.txt"), self._hist_abs_rms_y)
-        __save_graph_data(os.path.join(save_session_dir, "orbit_rms_xy_after_correction.txt"), self._hist_abs_rms_xy)
 
         qm_matrices = {}
         if response is not None:
@@ -701,3 +749,216 @@ class SaveOrLoad():
             pickle.dump(qm_matrices, f)
 
         return save_session_dir
+
+    def _save_bumps_machine_status(self, machine_state=None):
+        if self._session_dir is None:
+            saved_at = self._clock_now()
+            time_str = saved_at.strftime("%y%m%d%H%M%S")
+            default_dir = os.path.expanduser(os.path.expandvars("~/CERN-Flight_Simulator-Data/"))
+            self._session_dir = os.path.join(default_dir, f"Bumps_{self.interface.get_name()}{time_str}_session_settings")
+            os.makedirs(self._session_dir, exist_ok=True)
+        machine_status_file = os.path.join(self._session_dir, "machine_status.pkl")
+        if not os.path.isfile(machine_status_file):
+            machine_state = machine_state if machine_state is not None else self.interface.get_state()
+            machine_state.timestamp = self._clock_now()
+            machine_state.save(filename=machine_status_file)
+        self.loadsave_session_edit.setText(self._session_dir)
+        return machine_state
+
+    def _bumps_session_settings(self):
+        try:
+            rcond = float(self.pinv_edit.text())
+        except ValueError:
+            rcond = self.pinv_value
+        try:
+            beta = float(self.beta_edit.text())
+        except ValueError:
+            beta = self.beta_value
+        return {
+            "saved_at": self._clock_now().isoformat(timespec="seconds"),
+            "timezone": self._clock_zone_name,
+            "interface_id": f"{type(self.interface).__module__}.{type(self.interface).__name__}",
+            "actuator_mode": "Kicker",
+            "response_directory": self._expand_path(self.response_dir_edit.text()) if self.response_dir_edit.text().strip() else None,
+            "nsamples": int(self.interface.nsamples),
+            "rcond": rcond,
+            "beta": beta,
+            "max_horizontal_current": self.max_horizontal_current_spinbox.value(),
+            "max_vertical_current": self.max_vertical_current_spinbox.value(),
+            "is_triangular": bool(self.triangular_checkbox.isChecked()),
+            "targets": {
+                str(name): {plane: None if value is None else float(value) for plane, value in values.items()}
+                for name, values in self.targets.items()
+            },
+        }
+
+    def _save_bumps_reference_orbit(self):
+        if self.reference is None:
+            return
+        reference = {
+            "names": [str(name) for name in self.reference["names"]],
+            "x": np.asarray(self.reference["x"], dtype=float).tolist(),
+            "y": np.asarray(self.reference["y"], dtype=float).tolist(),
+        }
+        with open(os.path.join(self._session_dir, "reference_orbit.json"), "w") as file:
+            json.dump(reference, file, indent=2)
+
+    def _save_bumps_result_orbit(self):
+        if self._result_data is None:
+            return
+        result = {key: value for key, value in self._result_data.items() if value is not None}
+        result["bpms"] = np.asarray(result["bpms"], dtype=str)
+        np.savez(os.path.join(self._session_dir, "result_orbit.npz"), **result)
+
+    def _save_bumps_session(self, machine_state=None):
+        self._save_bumps_machine_status(machine_state)
+        self._saving_func(self.correctors_list, "correctors.txt", "Save Correctors", use_dialog=False,
+                          base_dir=self._session_dir)
+        self._saving_func(self.bpms_list, "bpms.txt", "Save BPMs", use_dialog=False, base_dir=self._session_dir)
+        with open(os.path.join(self._session_dir, "correction_settings.json"), "w") as file:
+            json.dump(self._bumps_session_settings(), file, indent=2)
+        self._save_bumps_reference_orbit()
+        self._save_bumps_result_orbit()
+
+    def _append_bumps_kicks(self, before, after):
+        kicks_path = os.path.join(self._session_dir, "kicks.txt")
+        write_header = not os.path.exists(kicks_path)
+        with open(kicks_path, "a") as file:
+            if write_header:
+                file.write("time\titeration\tcorrector\tbdes_before\tapplied_kick\tbdes_after\n")
+            timestamp = self._clock_now().isoformat(timespec="seconds")
+            for corrector, previous, current in zip(self.corrector_names, before, after):
+                applied_kick = float(current) - float(previous)
+                file.write(f"{timestamp}\t{self._session_kick_count}\t{corrector}\t{float(previous):.12g}\t{applied_kick:.12g}\t{float(current):.12g}\n")
+
+    @staticmethod
+    def _bumps_state_matches_interface(state, interface):
+        interface_id = f"{type(interface).__module__}.{type(interface).__name__}"
+        return state.get_interface_id() == interface_id
+
+    def _pick_and_load_bumps_machine_status_file(self):
+        directory = os.path.expanduser(os.path.expandvars("~/CERN-Flight_Simulator-Data/"))
+        filename, _ = QFileDialog.getOpenFileName(self, "Load Machine Status", directory, "Machine status (*.pkl)")
+        if filename:
+            self._load_bumps_machine_status_file(filename)
+
+    def _load_bumps_machine_status_file(self, filename):
+        try:
+            state = State(filename=filename)
+        except Exception as exc:
+            QMessageBox.warning(self, "Restore machine status", f"Could not load this file:\n{exc}")
+            return False
+        if not self._bumps_state_matches_interface(state, self.interface):
+            QMessageBox.warning(self, "Restore machine status", "This machine status was created on a different interface/machine. Choose appropriate one or change interface.")
+            return False
+        if self.interface.restore_correctors_state(state) is False:
+            QMessageBox.warning(self, "Restore machine status", "Not every corrector was set back at its saved current. Check them on the machine.")
+        self.interface.restore_quadrupoles_state(state)
+        self.interface.restore_sextupoles_state(state)
+        self.interface.restore_beam_settings(state.get_beam_settings())
+        self.corr_status_edit.setText(filename)
+        timestamp = state.get_timestamp()
+        saved_at = timestamp.isoformat(sep=" ", timespec="seconds") if getattr(timestamp, "tzinfo", None) is not None else timestamp.strftime("%Y-%m-%d %H:%M:%S") + " (legacy/local timezone)"
+        QMessageBox.information(self, "Restore machine status", f"Machine status restored.\nSaved at: {saved_at}")
+        return True
+
+    def _pick_and_load_bumps_session(self):
+        directory = os.path.expanduser(os.path.expandvars("~/CERN-Flight_Simulator-Data/"))
+        folder = QFileDialog.getExistingDirectory(self, "Select Bumps session directory", directory)
+        if folder:
+            self._load_bumps_session(folder)
+
+    def _load_bumps_session(self, folder):
+        folder = self._expand_path(folder)
+        settings_path = os.path.join(folder, "correction_settings.json")
+        if not os.path.isfile(settings_path):
+            QMessageBox.warning(self, "Load session", "Selected folder doesn't contain proper correction settings.")
+            return
+        try:
+            with open(settings_path, "r") as file:
+                settings = json.load(file)
+        except Exception as exc:
+            QMessageBox.warning(self, "Load session", f"Couldn't read correction_settings.json: {exc}")
+            return
+        saved_interface_id = settings.get("interface_id")
+        current_interface_id = f"{type(self.interface).__module__}.{type(self.interface).__name__}"
+        if saved_interface_id is not None and saved_interface_id != current_interface_id:
+            QMessageBox.warning(self, "Load session", "This session was created on a different interface/machine. Choose appropriate one or change interface.")
+            return
+        response_directory = settings.get("response_directory")
+        if response_directory:
+            self.response_matrix_data = None
+            self._load_response_directory(response_directory)
+            if self.response_matrix_data is None:
+                return
+        self.reference = None
+        self.restore_state = None
+        self._loading_func(self.correctors_list, "correctors.txt", "Load Correctors", use_dialog=False, base_dir=folder)
+        self._loading_func(self.bpms_list, "bpms.txt", "Load BPMs", use_dialog=False, base_dir=folder)
+        if "rcond" in settings:
+            self.pinv_edit.setText(str(settings["rcond"]))
+        if "beta" in settings:
+            self.beta_edit.setText(str(settings["beta"]))
+        if "nsamples" in settings:
+            self.bpm_samples_edit.setText(str(settings["nsamples"]))
+        if "max_horizontal_current" in settings:
+            self.max_horizontal_current_spinbox.setValue(float(settings["max_horizontal_current"]))
+        if "max_vertical_current" in settings:
+            self.max_vertical_current_spinbox.setValue(float(settings["max_vertical_current"]))
+        if "is_triangular" in settings:
+            self.triangular_checkbox.setChecked(bool(settings["is_triangular"]))
+        self.targets = {
+            str(name): {plane: values.get(plane) for plane in ("x", "y")}
+            for name, values in settings.get("targets", {}).items()
+        }
+        reference_path = os.path.join(folder, "reference_orbit.json")
+        if os.path.isfile(reference_path):
+            try:
+                with open(reference_path, "r") as file:
+                    reference = json.load(file)
+                self.reference = {
+                    "names": [str(name) for name in reference["names"]],
+                    "x": np.asarray(reference["x"], dtype=float),
+                    "y": np.asarray(reference["y"], dtype=float),
+                }
+            except Exception:
+                self.reference = None
+        reference_state_path = os.path.join(folder, "reference_machine_status.pkl")
+        if os.path.isfile(reference_state_path):
+            try:
+                reference_state = State(filename=reference_state_path)
+                if self._bumps_state_matches_interface(reference_state, self.interface):
+                    self.restore_state = reference_state
+            except Exception:
+                self.restore_state = None
+        self.restore_button.setEnabled(self.restore_state is not None)
+        result_path = os.path.join(folder, "result_orbit.npz")
+        if os.path.isfile(result_path):
+            try:
+                with np.load(result_path, allow_pickle=False) as result:
+                    measured_x = result["measured_x"] if "measured_x" in result.files else None
+                    measured_y = result["measured_y"] if "measured_y" in result.files else None
+                    self._draw_result_plot(
+                        result["bpms"].astype(str).tolist(), result["desired_x"], result["desired_y"],
+                        result["predicted_x"], result["predicted_y"], measured_x, measured_y,
+                    )
+            except Exception:
+                self._result_data = None
+                self._draw_result_placeholder()
+        self._session_dir = folder
+        self._session_kick_count = 0
+        kicks_path = os.path.join(folder, "kicks.txt")
+        if os.path.isfile(kicks_path):
+            with open(kicks_path, "r") as file:
+                for line in file:
+                    fields = line.rstrip("\n").split("\t")
+                    if len(fields) > 1:
+                        try:
+                            self._session_kick_count = max(self._session_kick_count, int(fields[1]))
+                        except ValueError:
+                            pass
+        self.loadsave_session_edit.setText(folder)
+        self.apply_button.setEnabled(False)
+        self._refresh_desired_plot()
+        saved_at = settings.get("saved_at")
+        QMessageBox.information(self, "Load session", f"Loaded session" + (f"\nSaved at: {saved_at}" if saved_at else ""))

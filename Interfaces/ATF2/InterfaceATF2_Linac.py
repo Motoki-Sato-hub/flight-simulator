@@ -146,8 +146,10 @@ class InterfaceATF2_Linac(AbstractMachineInterface):
             'ext:EXTcharge', 'linacbt:BTEcharge', 'BIM:DR:nparticles', 'BIM:IP:nparticles'
         ]
         self.phase_kl1 = PV('CM1L:phaseRead').get()
+        self.cm1l_test_phase = self.phase_kl1 + 5
         self.laser_intensity1 = PV('RFGun:LaserIntensity1:Read').get()
         self.laser_intensity2 = PV('RFGun:LaserIntensity2:Read').get()
+        self.test_laser_intensity = 0.15
         self.machine_name = "ATF2"
 
     def log_messages(self,console):
@@ -160,31 +162,31 @@ class InterfaceATF2_Linac(AbstractMachineInterface):
         beta_rel = np.sqrt(1.0 - 1.0 / gamma_rel ** 2)
         return gamma_rel, beta_rel
 
+    def _pv_readback(self, pv_name):
+        return lambda: self.make_safe_float(PV(pv_name).get(), default=np.nan)
+
     def change_energy(self):
-        pv = PV('CM1L:phaseWrite')
-        rel_phase = 5
-        target = self.phase_kl1 + rel_phase
-        pv.put(target)
-        self._wait_for_pv_readback('CM1L:phaseRead', target)
+        target = self.cm1l_test_phase
+        if np.isclose(float(target), float(self.phase_kl1)):
+            raise RuntimeError(f"cm1l_test_phase ({target}) equals phase_kl1 ({self.phase_kl1}). DFS measured at this setting is not useful.")
+        self._set_and_verify(lambda: PV('CM1L:phaseWrite').put(target), self._pv_readback('CM1L:phaseRead'), target, description="CM1L:phaseRead (energy change)", tolerance=1e-3)
         dP_P = 0.0 # we don't really know it
         return dP_P
-        
-    def reset_energy(self):
-        pv = PV('CM1L:phaseWrite')
-        pv.put(self.phase_kl1)
-        self._wait_for_pv_readback('CM1L:phaseRead', self.phase_kl1)
 
-    def change_intensity(self, intensity=0.15):
+    def reset_energy(self):
+        self._set_and_verify(lambda: PV('CM1L:phaseWrite').put(self.phase_kl1), self._pv_readback('CM1L:phaseRead'), self.phase_kl1, description="CM1L:phaseRead (energy reset)", tolerance=1e-3)
+
+    def change_intensity(self, intensity=None):
+        if intensity is None:
+            intensity = self.test_laser_intensity
         print(f'Changing laser intensity to {intensity}...')
         laser_intensity1 = 10000 * float(intensity) / self.laser_intensity2
-        PV('RFGun:LaserIntensity1:Write').put(laser_intensity1)
-        self._wait_for_pv_readback('RFGun:LaserIntensity1:Read', laser_intensity1)
+        self._set_and_verify(lambda: PV('RFGun:LaserIntensity1:Write').put(laser_intensity1), self._pv_readback('RFGun:LaserIntensity1:Read'), laser_intensity1, description="RFGun:LaserIntensity1 (intensity change)", tolerance=1e-3)
         return self
 
     def reset_intensity(self):
         print('Resetting laser intensity...')
-        PV('RFGun:LaserIntensity1:Write').put(self.laser_intensity1)
-        self._wait_for_pv_readback('RFGun:LaserIntensity1:Read', self.laser_intensity1)
+        self._set_and_verify(lambda: PV('RFGun:LaserIntensity1:Write').put(self.laser_intensity1), self._pv_readback('RFGun:LaserIntensity1:Read'), self.laser_intensity1, description="RFGun:LaserIntensity1 (intensity reset)", tolerance=1e-3)
         return self
 
     def get_beam_settings(self):

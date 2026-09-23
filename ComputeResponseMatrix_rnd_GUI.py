@@ -1,17 +1,20 @@
 from Backend.State import State
 from Backend.Response import Response
+from Backend.ResponseMatrix_DFS_WFS_rnd import ResponseMatrix_DFS_WFS
 import numpy as np
 import glob,sys,os,argparse,matplotlib
 try:
     from PyQt6 import uic
-    from PyQt6.QtWidgets import QApplication, QMainWindow, QFileDialog, QListWidget
-    from PyQt6.QtCore import Qt, QThread, QObject, pyqtSignal, pyqtSlot
+    from PyQt6.QtWidgets import QApplication, QMainWindow, QFileDialog, QListWidget, QVBoxLayout, QSizePolicy, \
+        QMessageBox, QComboBox, QLabel
+    from PyQt6.QtCore import Qt, QThread, QObject, pyqtSignal, pyqtSlot, QTimer
     from PyQt6.QtTest import QTest
     pyqt_version = 6
 except ImportError:
     from PyQt5 import uic
-    from PyQt5.QtWidgets import QApplication, QMainWindow, QFileDialog, QListWidget
-    from PyQt5.QtCore import Qt, QThread, QObject, pyqtSignal, pyqtSlot
+    from PyQt5.QtWidgets import QApplication, QMainWindow, QFileDialog, QListWidget, QVBoxLayout, QSizePolicy, \
+        QMessageBox, QComboBox, QLabel
+    from PyQt5.QtCore import Qt, QThread, QObject, pyqtSignal, pyqtSlot, QTimer
     from PyQt5.QtTest import QTest
     pyqt_version = 5
 from Backend.SaveOrLoad import SaveOrLoad
@@ -30,9 +33,12 @@ class MatplotlibWidget(FigureCanvas):
 class MainWindow(QMainWindow, SaveOrLoad):
     def __init__(self,data_dir_1=None,data_dir_2=None,comp_difference=False,auto_click_compute=False):
         super().__init__()
+        self._rnd_response = ResponseMatrix_DFS_WFS()
         uic.loadUi("UI files/ComputeResponseMatrix_GUI.ui", self)
         self.cwd = os.getcwd()
         self.R=None
+        self.correctors=[]
+        self.bpms=[]
         self.data_dir_1=data_dir_1
         self.data_dir_2=data_dir_2
         self.comp_difference=comp_difference
@@ -46,6 +52,8 @@ class MainWindow(QMainWindow, SaveOrLoad):
         self.save_as_button.clicked.connect(self.__save_as_button_clicked)
         self.diff_checkbox.toggled.connect(self._compute_difference_clicked)
         self._compute_difference_clicked(self.diff_checkbox.isChecked())
+        self.label_actuator_type.setVisible(False)
+        self.actuator_type_combo.setVisible(False)
         self.load_correctors_button.clicked.connect(self.__load_correctors_button_clicked)
         self.load_bpms_button.clicked.connect(self.__load_bpms_button_clicked)
 
@@ -55,6 +63,7 @@ class MainWindow(QMainWindow, SaveOrLoad):
         self.plot = MatplotlibWidget(self.plot_widget)
         self.plot.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         layout.addWidget(self.plot)
+        self._add_sample_kind_control()
 
         if self.data_dir_1:
             self.data_dir_1=self._expand_path(self.data_dir_1)
@@ -69,6 +78,20 @@ class MainWindow(QMainWindow, SaveOrLoad):
             self._load_lists_from_directory(self.data_dir_2)
         if self.auto_click_compute:
             QTimer.singleShot(0, self.__compute_button_clicked)
+
+    def _add_sample_kind_control(self):
+        self.sample_kind_label = QLabel("State:", self)
+        self.sample_kind_combo = QComboBox(self)
+        self.sample_kind_combo.addItem("nominal", "nominal")
+        self.sample_kind_combo.addItem("energy", "energy")
+        self.sample_kind_combo.currentIndexChanged.connect(self._reload_lists_for_selected_kind)
+        self.dirA_layout.addWidget(self.sample_kind_label)
+        self.dirA_layout.addWidget(self.sample_kind_combo)
+
+    def _reload_lists_for_selected_kind(self):
+        folder = self._expand_path(self.data_directory_1.text())
+        if folder:
+            self._load_lists_from_directory(folder)
 
     def _expand_path(self,path):
         expanded_path=(path or "").strip()
@@ -92,10 +115,11 @@ class MainWindow(QMainWindow, SaveOrLoad):
 
     def _load_lists_from_directory(self,folder):
         folder=self._expand_path(folder)
-        datafiles=sorted(glob.glob(os.path.join(folder,"SAMPLE*.pkl")))
-        if not datafiles:
+        info = self._rnd_response._find_useful_files(
+            folder, sample_kind=self.sample_kind_combo.currentData())
+        if not info["ok"]:
             return
-        S=State(filename=datafiles[0])
+        S=State(filename=info["pairs"][0])
         self.sequence=S.sequence
         self.correctors=list(S.get_correctors()["names"])
         self.bpms=list(S.get_bpms()["names"])
@@ -106,127 +130,22 @@ class MainWindow(QMainWindow, SaveOrLoad):
         self.bpms_list.clear()
         self.bpms_list.addItems([str(b) for b in self.bpms])
 
-    def _compute_response_of_one_data_directory(self,directory):
-        directory=self._expand_path(directory)
-        datafiles=sorted(glob.glob(os.path.join(directory, "SAMPLE*.pkl")))
-        if not datafiles:
-            QMessageBox.warning(self,"No DATA files found.","No valid data found")
-            return
+    def _compute_response_of_one_data_directory(self, directory):
+        directory = self._expand_path(directory)
+        correctors = [item.text() for item in self.correctors_list.selectedItems()] or list(self.correctors)
+        bpms = [item.text() for item in self.bpms_list.selectedItems()] or list(self.bpms)
 
-        S = State(filename=datafiles[0])
-        sequence=S.sequence
+        Rxx, Ryy, Rxy, Ryx, Bx, By, hcorrs, vcorrs, fitted_bpms = \
+            self._rnd_response._compute_response_matrix_from_directory(
+                directory=directory,
+                correctors=correctors,
+                bpms=bpms,
+                triangular=bool(self.triangular_checkbox.isChecked()),
+                sample_kind=self.sample_kind_combo.currentData(),
+            )
 
-        correctors = [item.text() for item in self.correctors_list.selectedItems()]
-        bpms = [item.text() for item in self.bpms_list.selectedItems()]
-
-        if not correctors:
-            for i in range(self.correctors_list.count()):
-                self.correctors_list.item(i).setSelected(True)
-            correctors = self.correctors
-
-        if not bpms:
-            for i in range(self.bpms_list.count()):
-                self.bpms_list.item(i).setSelected(True)
-            bpms = self.bpms
-
-        hcorrs = [string for string in correctors if string.lower().startswith('x')]
-        vcorrs = [string for string in correctors if string.lower().startswith('y')]
-
-        # Pick all correctors preceding the last bpm
-        hcorrs = [corr for corr in hcorrs if sequence.index(corr) < sequence.index(bpms[-1])]
-        vcorrs = [corr for corr in vcorrs if sequence.index(corr) < sequence.index(bpms[-1])]
-
-        # Pick all bpms following the first corrector
-        bpms = [bpm for bpm in bpms if sequence.index(bpm) > sequence.index(hcorrs[0])]
-        bpms = [bpm for bpm in bpms if sequence.index(bpm) > sequence.index(vcorrs[0])]
-
-        # Read all orbits
-        Bx = np.empty((0, len(bpms)))
-        By = np.empty((0, len(bpms)))
-        Cx = np.empty((0, len(hcorrs)))
-        Cy = np.empty((0, len(vcorrs)))
-        B_mask = np.full((1, len(bpms)), True, dtype=bool)
-        for datafile in datafiles:
-            Sp = State(filename=datafile)
-            Op = Sp.get_orbit(bpms)
-            all_not_finite  = not np.any(np.isfinite(Op['x']))
-            all_not_finite |= not np.any(np.isfinite(Op['y']))
-            if all_not_finite:
-                print(f'Skipping all-Nan file {datafile}')
-                continue
-            B_mask &= np.isfinite(Op['x']) & np.isfinite(Op['y'])
-            Cx_p = Sp.get_correctors(hcorrs)['bact']
-            Cy_p = Sp.get_correctors(vcorrs)['bact']
-            Bx = np.vstack((Bx, Op['x']))
-            By = np.vstack((By, Op['y']))
-            Cx = np.vstack((Cx, Cx_p))
-            Cy = np.vstack((Cy, Cy_p))
-
-        B_mask = B_mask.ravel()
-
-        # Compute the response matrices
-        ones_column_x = np.ones((Cx.shape[0], 1))
-        ones_column_y = np.ones((Cy.shape[0], 1))
-
-        # Add the column of ones to the matrix
-        Cx = np.hstack((Cx, ones_column_x)).astype('float')
-        Cy = np.hstack((Cy, ones_column_y)).astype('float')
-
-        Bx = Bx.astype('float')
-        By = By.astype('float')
-
-        def lstsq(C, B):
-            return np.transpose(np.linalg.lstsq(C, B[:,B_mask], rcond=None)[0])
-
-        Rxx_ = lstsq(Cx, Bx)
-        Rxy_ = lstsq(Cy, Bx)
-        Ryx_ = lstsq(Cx, By)
-        Ryy_ = lstsq(Cy, By)
-
-        # Response matrices
-        Rxx_ = Rxx_[:, :-1]
-        Rxy_ = Rxy_[:, :-1]
-        Ryx_ = Ryx_[:, :-1]
-        Ryy_ = Ryy_[:, :-1]
-
-        # Restore nan columns
-        k = B_mask.size
-
-        Rxx = np.full((k,Rxx_.shape[1]), np.nan)
-        Rxy = np.full((k,Rxy_.shape[1]), np.nan)
-        Ryx = np.full((k,Ryx_.shape[1]), np.nan)
-        Ryy = np.full((k,Ryy_.shape[1]), np.nan)
-
-        Rxx[B_mask,:] = Rxx_
-        Rxy[B_mask,:] = Rxy_
-        Ryx[B_mask,:] = Ryx_
-        Ryy[B_mask,:] = Ryy_
-
-        # Reference trajectory
-        '''
-        Bx = Rxx[:,-1]
-        By = Ryy[:,-1]
-        '''
-
-        Bx = np.mean(Bx, axis=0).reshape(-1, 1)
-        By = np.mean(By, axis=0).reshape(-1, 1)
-
-
-        # Zero the response of all bpms preceeding the correctors
-        if self.triangular_checkbox.isChecked():
-            for corr in hcorrs:
-                bpm_indexes = [bpms.index(bpm) for bpm in bpms if sequence.index(bpm) < sequence.index(corr)]
-                Rxx[bpm_indexes, hcorrs.index(corr)] = 0
-                Ryx[bpm_indexes, hcorrs.index(corr)] = 0
-
-            for corr in vcorrs:
-                bpm_indexes = [bpms.index(bpm) for bpm in bpms if sequence.index(bpm) < sequence.index(corr)]
-                Rxy[bpm_indexes, vcorrs.index(corr)] = 0
-                Ryy[bpm_indexes, vcorrs.index(corr)] = 0
-
-        # Save on disk
         R = Response()
-        R.bpms = bpms
+        R.bpms = fitted_bpms
         R.hcorrs = hcorrs
         R.vcorrs = vcorrs
         R.Rxx = Rxx
@@ -316,7 +235,6 @@ class MainWindow(QMainWindow, SaveOrLoad):
         ax1.set_title('$R_{xx}$')
         ax1.set_xlabel('Corrector [#]')
         ax1.set_ylabel('BPM [#]')
-
         ax3.plot_surface(X, Y, R.Ryx, cmap='viridis')
         ax3.set_title('$R_{yx}$')
         ax3.set_xlabel('Corrector [#]')
@@ -350,8 +268,7 @@ class MainWindow(QMainWindow, SaveOrLoad):
             R1=self._compute_response_of_one_data_directory(directory_1)
 
             if self.diff_checkbox.isChecked():
-                self._expand_path(self.data_directory_2.text())
-                directory_2 = (self.data_directory_2.text() or "").strip()
+                directory_2 = self._expand_path(self.data_directory_2.text())
                 if not directory_2:
                     QMessageBox.warning(self, "Error", "No second data directory specified")
                     return

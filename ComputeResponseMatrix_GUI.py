@@ -164,7 +164,7 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS):
         plot.flush_events()
         plot.repaint()
 
-    def _compute_response_of_one_data_directory(self,directory):
+    def _compute_response_of_one_data_directory(self, directory):
         directory=self._expand_path(directory)
         datafiles=sorted(glob.glob(os.path.join(directory,"DATA*.pkl")))
         if not datafiles:

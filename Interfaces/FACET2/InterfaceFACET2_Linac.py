@@ -92,6 +92,9 @@ class InterfaceFACET2_Linac(AbstractMachineInterface):
         # initial bunch charge setpoint for reset_intensity
         self.init_charge_setpoint = self.PVs['Q_setpoint'].get()
         self.UVWP_init = self.PVs['UVWP_angle'].get()
+        self.bba_bc11_energy_offset_mev = -3.0
+        self.bba_downstream_energy_offset_mev = -40.0
+        self.bba_uvwp_offset_deg = -2.5
         # initialize bpm data buffer
         self.bpm_buffer = make_bpm_buffer(self.f2m, self.bpms, Npts=self.nsamples)
         print('InterfaceFACET2_Linac is ready')
@@ -178,52 +181,50 @@ class InterfaceFACET2_Linac(AbstractMachineInterface):
         beta_rel = np.sqrt(1.0 - 1.0 / gamma_rel ** 2)
         return gamma_rel, beta_rel
 
+    def _pv_readback(self, pv):
+        return lambda: self._safe_float(pv.get(), default=np.nan)
+
     def change_energy(self):
-        """ set beam to -2MeV at DL10 and disable downstream feedbacks """
+        if np.isclose(float(self.bba_bc11_energy_offset_mev), 0.0) or np.isclose(float(self.bba_downstream_energy_offset_mev), 0.0):
+            raise RuntimeError(
+                "bba_bc11_energy_offset_mev / bba_downstream_energy_offset_mev is 0; reset_energy() "
+                "sets these PVs to 0.0 too, so a DFS would be meaningless."
+            )
         print('Lowering beam energy starting from BC11')
         targets = {
-            'bc11e_setpoint': -3.0,
-            'bc14e_setpoint': -40.0,
-            'bc20e_setpoint': -40.0,
+            'bc11e_setpoint': self.bba_bc11_energy_offset_mev,
+            'bc14e_setpoint': self.bba_downstream_energy_offset_mev,
+            'bc20e_setpoint': self.bba_downstream_energy_offset_mev,
         }
         for name, target in targets.items():
-            self.PVs[name].put(target)
-        for name, target in targets.items():
-            self._wait_for_pv_readback(self.PVs[name], target, description=name)
+            self._set_and_verify(lambda name=name, target=target: self.PVs[name].put(target), self._pv_readback(self.PVs[name]), target, description=name)
         # get_pv(f'PHYS:SYS1:1:F2LFB_BC11BL_TARGET').put(4400)
         # get_pv(f'PHYS:SYS1:1:F2LFB_BC14BL_TARGET').put(5000)
-        return -(3.0/335.0)
+        return float(self.bba_bc11_energy_offset_mev) / 335.0
 
     def reset_energy(self):
-        """ zero dl10 setpoint, re-enable feedbacks """
         print('Restoring beam energy at BC11, re-enabling feedbacks')
         for name in ('bc11e_setpoint', 'bc14e_setpoint', 'bc20e_setpoint'):
-            self.PVs[name].put(0.0)
-        for name in ('bc11e_setpoint', 'bc14e_setpoint', 'bc20e_setpoint'):
-            self._wait_for_pv_readback(self.PVs[name], 0.0, description=name)
+            self._set_and_verify(lambda name=name: self.PVs[name].put(0.0), self._pv_readback(self.PVs[name]), 0.0, description=name)
         # get_pv(f'PHYS:SYS1:1:F2LFB_BC11BL_TARGET').put(5000)
         # get_pv(f'PHYS:SYS1:1:F2LFB_BC14BL_TARGET').put(8000)
 
     def change_intensity(self):
-        """ lowers bunch charge by ~200pC (2.5deg UV WP angle adjustment) """
+        if np.isclose(float(self.bba_uvwp_offset_deg), 0.0):
+            raise RuntimeError("bba_uvwp_offset_deg is 0; a WFS would be meaningless.")
         self.UVWP_init = self.PVs['UVWP_angle'].get()
         self.Q_init = self._meascharge()
-        uvwp_target = self.UVWP_init - 2.5
-        self.PVs['UVWP_angle'].put(uvwp_target)
-        self._wait_for_pv_readback(self.PVs['UVWP_angle'], uvwp_target, description='UVWP_angle')
+        uvwp_target = self.UVWP_init + self.bba_uvwp_offset_deg
+        self._set_and_verify(lambda: self.PVs['UVWP_angle'].put(uvwp_target), self._pv_readback(self.PVs['UVWP_angle']), uvwp_target, description='UVWP_angle')
         self.Q_new = self._meascharge()
-        self.PVs['Q_setpoint'].put(self.Q_new)
-        self._wait_for_pv_readback(self.PVs['Q_setpoint'], self.Q_new, description='Q_setpoint')
+        self._set_and_verify(lambda: self.PVs['Q_setpoint'].put(self.Q_new), self._pv_readback(self.PVs['Q_setpoint']), self.Q_new, description='Q_setpoint')
         print(f'Charge changed: {self.Q_init:.1f}  {self.Q_new:.1f} pC')
         return self
 
     def reset_intensity(self):
-        """ restore bunch charge to initial settings """
         print(f'restoring charge setpoint to {self.init_charge_setpoint} pC')
-        self.PVs['UVWP_angle'].put(self.UVWP_init)
-        self.PVs['Q_setpoint'].put(self.init_charge_setpoint)
-        self._wait_for_pv_readback(self.PVs['UVWP_angle'], self.UVWP_init, description='UVWP_angle')
-        self._wait_for_pv_readback(self.PVs['Q_setpoint'], self.init_charge_setpoint, description='Q_setpoint')
+        self._set_and_verify(lambda: self.PVs['UVWP_angle'].put(self.UVWP_init), self._pv_readback(self.PVs['UVWP_angle']), self.UVWP_init, description='UVWP_angle')
+        self._set_and_verify(lambda: self.PVs['Q_setpoint'].put(self.init_charge_setpoint), self._pv_readback(self.PVs['Q_setpoint']), self.init_charge_setpoint, description='Q_setpoint')
         return self
 
     def get_beam_settings(self):

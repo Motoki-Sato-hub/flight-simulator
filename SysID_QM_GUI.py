@@ -28,7 +28,10 @@ class QMWorker(CorrectorWorker):
         super().__init__(*args, **kwargs)
         self.actuator_mode = ActuatorMode.QM
 
-    def run(self):
+    def _run_impl(self):
+        # Overrides CorrectorWorker._run_impl(), not run() — this way it still goes
+        # through the base class's run() wrapper, which guarantees `finished` fires
+        # (and the machine's energy/intensity get restored) even if this raises.
         self.running = True
         self.paused = False
         self.progress_value = 0
@@ -120,7 +123,6 @@ class QMWorker(CorrectorWorker):
                         time.sleep(0.2)
 
         self.running = False
-        self.finished.emit()
 
     def _data_filename(self, magnet, axis, sign, iteration):
         suffix = "p" if sign == "+" else "m"

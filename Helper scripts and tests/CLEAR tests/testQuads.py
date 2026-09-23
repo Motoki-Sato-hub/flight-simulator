@@ -45,7 +45,7 @@ print(f"names from method get_quadrupoles: {result['names']}")
 print(f"bdes  from method get_quadrupoles: {result['bdes']}")
 print(f"bact  from method get_quadrupoles: {result['bact']}")
 
-result2= I.set_quadrupoles(names= ["CA.QFD0350"], values=10.699)
+result2= I.set_quadrupoles(names=["CA.QFD0350"], currents_A=10.699)
 result = I.get_quadrupoles(names=["CA.QFD0350"])
 print(f"names from method set_quadrupoles: {result['names']}")
 print(f"bdes  from method set_quadrupoles: {result['bdes']}")

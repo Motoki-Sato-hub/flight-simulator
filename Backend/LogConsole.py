@@ -12,7 +12,8 @@ class LogConsole(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Log Console")
-        self.setWindowFlag(Qt.WindowType.WindowContextHelpButtonHint, False)
+        context_help_hint = Qt.WindowType.WindowContextHelpButtonHint if hasattr(Qt, "WindowType") else Qt.WindowContextHelpButtonHint
+        self.setWindowFlag(context_help_hint, False)
         self.setMinimumSize(520, 320)
         self.resize(700, 420)
         self.setSizeGripEnabled(True)

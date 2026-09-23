@@ -29,7 +29,7 @@ class TestOrbits(QDialog):
         self.axes_y=self.fig_y.add_subplot(111)
         layout.addWidget(self.canvas_x)
         layout.addWidget(self.canvas_y)
-    def _plot_test_orbits(self,selected_bpms,O0x,O0y,O1x=None,O1y=None,O2x=None,O2y=None):
+    def _plot_test_orbits(self,selected_bpms,O0x,O0y,O1x=None,O1y=None,O2x=None,O2y=None,dfs_err_x=None,dfs_err_y=None):
         #DFS test orbit x=O1x-O0x
         #WFS test orbit x=O2x-O0x
         l_bpms = len(selected_bpms)
@@ -46,6 +46,8 @@ class TestOrbits(QDialog):
         O1y=flatten(O1y)
         O2x=flatten(O2x)
         O2y=flatten(O2y)
+        dfs_err_x=flatten(dfs_err_x)
+        dfs_err_y=flatten(dfs_err_y)
 
         if O0x is None or O0y is None:
             return
@@ -55,12 +57,12 @@ class TestOrbits(QDialog):
         self.axes_y.clear()
 
         if O1x is not None:
-            self.axes_x.plot(xpos, (O1x-O0x),label="DFS (O1-O0)")
+            self.axes_x.errorbar(xpos, O1x-O0x, yerr=dfs_err_x, fmt="o-", capsize=3, label="DFS (O1-O0)")
         if O2x is not None:
             self.axes_x.plot(xpos, (O2x-O0x),label="WFS (O2-O0)")
 
         if O1y is not None:
-            self.axes_y.plot(xpos, (O1y-O0y),label="DFS (O1-O0)")
+            self.axes_y.errorbar(xpos, O1y-O0y, yerr=dfs_err_y, fmt="o-", capsize=3, label="DFS (O1-O0)")
         if O2y is not None:
             self.axes_y.plot(xpos, (O2y-O0y),label="WFS (O2-O0)")
 

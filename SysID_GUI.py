@@ -71,6 +71,7 @@ class Worker(QObject):
     plot_data = pyqtSignal(np.ndarray, np.ndarray, np.ndarray, np.ndarray, object, str)
     progress=pyqtSignal(int)
     finished = pyqtSignal()
+    error = pyqtSignal(str)
 
     def __init__(self, interface, state, correctors, bpms, hkicks, vkicks, max_osc_h, max_osc_v, max_curr_h, max_curr_v, Niter, output_dir, actuator_mode=ActuatorMode.Kicker, state_class=None):
         super().__init__()
@@ -95,6 +96,15 @@ class Worker(QObject):
 
     @pyqtSlot()
     def run(self):
+        try:
+            self._run_impl()
+        except Exception as e:
+            self.running = False
+            self.error.emit(str(e))
+        finally:
+            self.finished.emit()
+
+    def _run_impl(self):
         self.running = True
         self.paused = False
         self.progress_value=0
@@ -235,18 +245,6 @@ class Worker(QObject):
                     hkicks[icorr] = new_kick
                 else:
                     vkicks[icorr] = new_kick
-                # if corrector in self.hcorrs:
-                #     Diff_x_clean = Diff_x[~np.isnan(Diff_x)]
-                #     if np.max(np.abs(Diff_x_clean)) != 0.0:
-                #         hkicks[icorr] *= self.max_osc_h / np.max(np.abs(Diff_x_clean))
-                #     hkicks[icorr] = 0.8 * hkicks[icorr] + 0.2 * kick
-
-                # else:
-                #     Diff_y_clean = Diff_y[~np.isnan(Diff_y)]
-                #     if np.max(np.abs(Diff_y_clean)) != 0.0:
-                #         vkicks[icorr] *= self.max_osc_v / np.max(np.abs(Diff_y_clean))
-                #     vkicks[icorr] = 0.8 * vkicks[icorr] + 0.2 * kick
-
                 with open(os.path.join(self.output_dir,'kicks.txt'), 'w') as f:
                     for i, c in enumerate(self.correctors):
                         f.write(f'{c} {hkicks[i]} {vkicks[i]}\n')
@@ -256,7 +254,6 @@ class Worker(QObject):
                         time.sleep(0.05)
 
         self.running = False
-        self.finished.emit()
 
     def pause(self):
         self.paused = True
@@ -290,6 +287,18 @@ class MainWindow(QMainWindow, SaveOrLoad):
     @pyqtSlot(int)
     def _update_progress(self,value):
         self.progressBar.setValue(value)
+
+    @pyqtSlot(str)
+    def _on_worker_error(self, message):
+        # The worker already guarantees `finished` fires (which restores nominal
+        # energy/intensity via clear_thread()); this only has to make sure the failure
+        # is visible and that we don't blindly continue on to the next SysID mode.
+        self.stop_requested = True
+        QMessageBox.critical(
+            self, "SysID error",
+            f"The {self.current_mode.name} measurement stopped because of an error:\n{message}\n\n"
+            "The machine is being restored to its nominal state; check it before restarting."
+        )
 
     def _update_folder_path(self):
         base = os.path.expanduser(os.path.expandvars("~/CERN-Flight_Simulator-Data"))
@@ -365,10 +374,13 @@ class MainWindow(QMainWindow, SaveOrLoad):
         self.max_horizontal_current_spinbox.setSingleStep(0.01)
         self.max_vertical_current_spinbox.setValue(max_curr_v)
         self.max_vertical_current_spinbox.setSingleStep(0.01)
-        self.horizontal_excursion_spinbox.setValue(0.5)
+        default_excursion = 5.0 if interface.get_name() == "CLEAR" else 0.5
+        self.horizontal_excursion_spinbox.setValue(default_excursion)
         self.horizontal_excursion_spinbox.setSingleStep(0.1)
-        self.vertical_excursion_spinbox.setValue(0.5)
+        self.vertical_excursion_spinbox.setValue(default_excursion)
         self.vertical_excursion_spinbox.setSingleStep(0.1)
+        self._setup_nsamples_control()
+        self._setup_beam_change_controls()
         self.state_class = interface.get_state().__class__
         self.working_directory_dialog.clicked.connect(self._pick_and_load_data_dir)
         self.__set_status_in_title("[Idle]")
@@ -391,6 +403,92 @@ class MainWindow(QMainWindow, SaveOrLoad):
         self.pattern_corrs_input.textChanged.connect(self.pattern_matching)
         self.sysid_plot_popup = None
         self._last_plot_data = None
+
+    def _setup_nsamples_control(self):
+        self.nsamples_input.setText(str(max(1, int(self.interface.nsamples))))
+        self.nsamples_input.textChanged.connect(self._set_interface_nsamples)
+
+    def _set_interface_nsamples(self, value):
+        try:
+            self.interface.nsamples = max(1, int(value))
+            self.nsamples_input.setStyleSheet("")
+        except (TypeError, ValueError):
+            self.nsamples_input.setStyleSheet("QLineEdit { border: 1px solid #c62828; }")
+
+    def _setup_beam_change_controls(self):
+        beam_change = (self._get_interface_initial_settings() or {}).get("beam_change", {})
+        self._beam_change_fields = []
+        controls = {
+            "energy": (
+                self.energy_change_group,
+                self.energy_nominal_container,
+                self.energy_nominal_label,
+                self.energy_nominal_input,
+                self.energy_test_container,
+                self.energy_test_label,
+                self.energy_test_input,
+                self.energy_change_tooltip,
+            ),
+            "intensity": (
+                self.intensity_change_group,
+                self.intensity_nominal_container,
+                self.intensity_nominal_label,
+                self.intensity_nominal_input,
+                self.intensity_test_container,
+                self.intensity_test_label,
+                self.intensity_test_input,
+                self.intensity_change_tooltip,
+            ),
+        }
+        for kind, widgets in controls.items():
+            (
+                title,
+                nominal_container,
+                nominal_label,
+                nominal_input,
+                test_container,
+                test_label,
+                test_input,
+                tooltip,
+            ) = widgets
+            settings = beam_change.get(kind)
+            title.setVisible(settings is not None)
+            tooltip.setVisible(settings is not None)
+            if settings is None:
+                for widget in (nominal_container, test_container):
+                    widget.setVisible(False)
+                continue
+            title.setTitle(settings["label"])
+            tooltip.setToolTip(settings["tooltip"])
+            for slot, container, label, input_widget in (
+                ("nominal", nominal_container, nominal_label, nominal_input),
+                ("test", test_container, test_label, test_input),
+            ):
+                field = settings.get(slot)
+                container.setVisible(field is not None)
+                if field is None:
+                    continue
+                label.setText(field["label"])
+                value = getattr(self.interface, field["attribute"], field.get("default", ""))
+                input_widget.setText("" if value is None else str(value))
+                self._beam_change_fields.append((input_widget, field))
+
+    def _apply_beam_change_controls(self):
+        for input_widget, field in self._beam_change_fields:
+            text = input_widget.text().strip()
+            if not text and field.get("allow_empty", False):
+                setattr(self.interface, field["attribute"], None)
+                input_widget.setStyleSheet("")
+                continue
+            try:
+                value = float(text)
+            except ValueError:
+                input_widget.setStyleSheet("QLineEdit { border: 1px solid #c62828; }")
+                QMessageBox.warning(self, "Invalid beam-change setting", f"{field['label']} must be a number.")
+                return False
+            input_widget.setStyleSheet("")
+            setattr(self.interface, field["attribute"], value)
+        return True
 
     def _handle_plot_double_click(self, event):
         if event is None:
@@ -491,7 +589,7 @@ class MainWindow(QMainWindow, SaveOrLoad):
         return self._sort_elements(names, which="corrs")
 
     def _restore_actuators_state(self, machine_state):
-        self.interface.restore_correctors_state(machine_state)
+        return self.interface.restore_correctors_state(machine_state)
 
     def _actuator_selection_filename(self):
         return "correctors.txt"
@@ -528,9 +626,6 @@ class MainWindow(QMainWindow, SaveOrLoad):
         return units_settings, sysid_kick,bpm_unit,corrs_unit
 
     def _start_next_mode(self):
-        #initial_hkick=self._read_initial_kicks()
-        #selected_correctors = self.interface.get_correctors()['names']
-        #kicks=initial_hkick*np.ones(len(self.selected_correctors),dtype=float)
         if self.counter>=len(self.modes_to_do):
             self.__set_status_in_title("[Idle]")
             self.progressBar.setValue(100)
@@ -545,14 +640,22 @@ class MainWindow(QMainWindow, SaveOrLoad):
         self.__set_status_in_title(f"[Running {mode.name} mode]")
         self.progressBar.setValue(0)
         machine_state=self.state_class(filename=os.path.join(dir_name,'machine_status.pkl'))
-        self._restore_actuators_state(machine_state)
+        if self._restore_actuators_state(machine_state) is False:
+            QMessageBox.warning(
+                self, "SysID restore",
+                f"Not every corrector was set back at its saved current before the {mode.name} measurement. Check the correctors on the machine.")
 
-        if mode==Mode.Dispersion:
+        if mode==Mode.Orbit:
+            #self.interface.reset_energy()
+            #self.interface.reset_intensity()
+            print("Nominal beam state confirmed for Orbit mode")
+        elif mode==Mode.Dispersion:
             self.interface.change_energy()
             print("Energy changed")
         elif mode==Mode.Wakefield:
             self.interface.change_intensity()
-            print("Intensity changed")
+            print("Intensity changed)")
+        return
 
     def _read_all_parameters(self,text):
         text = text.strip()
@@ -665,6 +768,9 @@ class MainWindow(QMainWindow, SaveOrLoad):
         self.stop_requested=False
         if self.thread and self.thread.isRunning():
             return  # already running
+        if not self._apply_beam_change_controls():
+            self._set_directory_edit_enabled(True)
+            return
 
         if not self._validate_start():
             self._set_directory_edit_enabled(True)
@@ -755,6 +861,7 @@ class MainWindow(QMainWindow, SaveOrLoad):
         self.thread.started.connect(self.worker.run)
         self.worker.finished.connect(self.thread.quit)
         self.worker.finished.connect(self.worker.deleteLater)
+        self.worker.error.connect(self._on_worker_error)
         self.thread.finished.connect(self.thread.deleteLater)
 
         # Cleanup after thread is done
@@ -768,11 +875,15 @@ class MainWindow(QMainWindow, SaveOrLoad):
                     self.interface.reset_intensity()
             except Exception as e:
                 print(e)
+                QMessageBox.warning(self, "Warning",f"Could not confirm the machine returned to its nominal state.")
             print("Restoring initial correctors' settings...")
             #self.S.load('machine_status')
             current_dir=self.mode_dirs[self.current_mode]
             machine_state=self.state_class(filename=os.path.join(current_dir,"machine_status.pkl"))
-            self._restore_actuators_state(machine_state)
+            if self._restore_actuators_state(machine_state) is False:
+                QMessageBox.warning(
+                    self, "SysID restore",
+                    "Not every corrector was set back at its saved current after this mode. Check the correctors on the machine.")
             self.progressBar.setValue(100)
             self.thread = None
             self.worker = None
@@ -812,6 +923,7 @@ class MainWindow(QMainWindow, SaveOrLoad):
                 self.thread.started.connect(self.worker.run)
                 self.worker.finished.connect(self.thread.quit)
                 self.worker.finished.connect(self.worker.deleteLater)
+                self.worker.error.connect(self._on_worker_error)
                 self.thread.finished.connect(self.thread.deleteLater)
                 self.thread.finished.connect(clear_thread)
                 self.worker.plot_data.connect(self.__update_plot)
@@ -917,12 +1029,6 @@ def main():
     if interface is None:
         return 1
 
-    # # ================ for a test!!
-    # from Backend.State import State
-    # state = State(filename="/Users/wiktoriamalek/CERN-Flight_Simulator-Data/CLEAR_BBA_260821/BBA_CLEAR260821163644_session_settings/machine_status.pkl")
-    # interface.restore_quadrupoles_state(state)
-    # # ===============================
-
     project_name = interface.get_name()
     print(f"Selected interface: {project_name}")
     time_str = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -930,7 +1036,6 @@ def main():
     window = MainWindow(interface=interface, dir_name=dir_name)
     window.show()
     return app.exec()
-
 
 if __name__ == "__main__":
     sys.exit(main())

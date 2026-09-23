@@ -5,7 +5,7 @@ import numpy as np
 
 try:
     from PyQt6 import uic
-    from PyQt6.QtCore import Qt, QProcess, QProcessEnvironment, QTimer
+    from PyQt6.QtCore import Qt, QProcess, QProcessEnvironment, QTimer, QEvent
     from PyQt6.QtWidgets import (QGroupBox, QApplication, QRadioButton, QSizePolicy, QMainWindow, QFileDialog,
                                  QListWidget, QListWidgetItem, QMessageBox, QProgressDialog, QVBoxLayout, QPushButton,
                                  QDialog, QLabel, QStyledItemDelegate, QWidget, QHBoxLayout)
@@ -14,7 +14,7 @@ try:
     pyqt_version = 6
 except ImportError:
     from PyQt5 import uic
-    from PyQt5.QtCore import Qt, QProcess, QProcessEnvironment, QTimer
+    from PyQt5.QtCore import Qt, QProcess, QProcessEnvironment, QTimer, QEvent
     from PyQt5.QtWidgets import (QGroupBox, QApplication, QRadioButton, QSizePolicy, QMainWindow, QFileDialog,
                                  QListWidget, QListWidgetItem, QMessageBox, QProgressDialog, QVBoxLayout, QPushButton,
                                  QDialog, QLabel, QStyledItemDelegate, QWidget, QHBoxLayout)
@@ -80,6 +80,7 @@ class BpmWeightsDelegate(QStyledItemDelegate):
         finally:
             painter.restore()
 
+
 class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS):
     def __init__(self, interface, dir_name, nominal_state=None, start_state=None):
         super().__init__()
@@ -93,15 +94,16 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS):
         self.measurement_start_state = None
         self._cancel = False
         self._number_re = re.compile(r"[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?")
-        # self.initial_state=interface.get_state() # initial, for restoring
-        # self.state=interface.get_state() # for latter use
         self.reset_reference_orbit = False
         ui_path = os.path.join(os.path.dirname(__file__), "UI files/BBA_GUI.ui")
         uic.loadUi(ui_path, self)
-        self._clock_zone_name= self._get_clock_zone()
+        self._clock_zone_name = self._get_clock_zone()
         self._setup_machine_clock()
         self._load_logo()
         self.bpms_list.setItemDelegate(BpmWeightsDelegate(self.bpms_list))
+        self._bpm_selection_before_click = []
+        self._bpm_weights_double_click = False
+        self.bpms_list.viewport().installEventFilter(self)
         self._data_dirs = {"traj": None, "dfs": None, "wfs": None}
         self._hist_orbit, self._hist_disp, self._hist_wake = [], [], []
         self._hist_orbit_x, self._hist_orbit_y = [], []
@@ -145,8 +147,11 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS):
         self.subtract_jitter_checkbox.setChecked(False)
         self.actuator_mode = ActuatorMode.Kicker
         self._setup_corrector_controls()
+        self._setup_beam_change_controls()
         self.restore_machine_status_button.clicked.connect(self._pick_and_load_machine_status_file)
         self.initial_charge_value = None
+        self.orbit_at_first_start_click_x = None
+        self.orbit_at_first_start_click_y = None
 
     def _save_machine_status(self):
         saved_at = self._clock_now()
@@ -177,8 +182,7 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS):
 
     def _update_machine_clock(self):
         now = self._clock_now()
-        self.machine_clock_label.setText(f""
-                                         f"{now:%Y-%m-%d %H:%M:%S} {now.tzname()}")
+        self.machine_clock_label.setText(f"{now:%Y-%m-%d %H:%M:%S} {now.tzname()}")
 
     def _setup_corrector_controls(self):
         self.groupBox_9.setVisible(False)
@@ -194,14 +198,13 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS):
         self.lineEdit_6.setText("0.4")
         self.lineEdit_beta.setText("0")
         self.transmission_value.setText("0.65")
+        self._setup_nsamples_control()
         self.compute_response_matrix_button.clicked.connect(self._display_response_matrix)
         self.pushButton_reset_ref_orbit.clicked.connect(self._reset_reference_orbit)
         self.reset_ref_orb = False
-        self.bpms_list.itemDoubleClicked.connect(self._edit_bpm_weights)
         correctors = self.interface.get_correctors()
         correctors_list = correctors['names']
-        self.hcorrector_names = set(map(str,
-                                        self.interface.get_hcorrectors_names() or []))  # takes correctors names, if None, then use an empty list, makes everything a string and saves as a set without the duplicates
+        self.hcorrector_names = set(map(str, self.interface.get_hcorrectors_names() or []))  # takes correctors names, if None, then use an empty list, makes everything a string and saves as a set without the duplicates
         self.vcorrector_names = set(map(str, self.interface.get_vcorrectors_names() or []))
         units_settings, sysid_kick, bpm_unit, corrs_unit = self._get_interface_units()
         self.sysid_kick = sysid_kick
@@ -222,12 +225,22 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS):
 
             max_curr_h = 1.15 * np.max(np.abs(clean_array(np.array(correctors['bdes'])[hcorr_indexes])))
             max_curr_v = 1.15 * np.max(np.abs(clean_array(np.array(correctors['bdes'])[vcorr_indexes])))
-
+            if "bba_max_h_strength" in units_settings: max_curr_h = units_settings["bba_max_h_strength"]
+            if "bba_max_v_strength" in units_settings: max_curr_v = units_settings["bba_max_v_strength"]
         self.max_horizontal_current_spinbox.setValue(max_curr_h)
         self.max_horizontal_current_spinbox.setSingleStep(0.01)
         self.max_vertical_current_spinbox.setValue(max_curr_v)
         self.max_vertical_current_spinbox.setSingleStep(0.01)
+
         self._refresh_metric_plots_for_mode()
+
+    def _setup_nsamples_control(self):
+        self.nsamples_input.setText(str(max(1, int(self.interface.nsamples))))
+        self.nsamples_input.textChanged.connect(self._set_interface_nsamples)
+
+    def _set_interface_nsamples(self, value):
+        self.interface.nsamples = max(1, int(value))
+        self.nsamples_input.setStyleSheet("")
 
     def _load_logo(self):
         self.logo_label.setText("")
@@ -360,16 +373,105 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS):
 
         return units_settings, sysid_kick, bpm_unit, corrs_unit
 
+    def _setup_beam_change_controls(self):
+        beam_change = (self._get_interface_initial_settings() or {}).get("beam_change", {})
+        self._beam_change_fields = []
+        self.beam_change_group.setVisible(bool(beam_change))
+
+        controls = {
+            "energy": (
+                self.energy_change_label,
+                self.energy_nominal_label,
+                self.energy_nominal_input,
+                self.energy_test_label,
+                self.energy_test_input,
+                self.energy_change_tooltip,
+            ),
+            "intensity": (
+                self.intensity_change_label,
+                self.intensity_nominal_label,
+                self.intensity_nominal_input,
+                self.intensity_test_label,
+                self.intensity_test_input,
+                self.intensity_change_tooltip,
+            ),
+        }
+        for kind, widgets in controls.items():
+            title, nominal_label, nominal_input, test_label, test_input, tooltip = widgets
+            settings = beam_change.get(kind)
+            title.setVisible(settings is not None)
+            tooltip.setVisible(settings is not None)
+            if settings is None:
+                for widget in (nominal_label, nominal_input, test_label, test_input):
+                    widget.setVisible(False)
+                continue
+            title.setText(settings["label"])
+            tooltip.setToolTip(settings["tooltip"])
+            for slot, label, input_widget in (
+                    ("nominal", nominal_label, nominal_input),
+                    ("test", test_label, test_input),
+            ):
+                field = settings.get(slot)
+                label.setVisible(field is not None)
+                input_widget.setVisible(field is not None)
+                if field is None:
+                    continue
+                label.setText(field["label"])
+                value = getattr(self.interface, field["attribute"], field.get("default", ""))
+                input_widget.setText("" if value is None else str(value))
+                input_widget.setPlaceholderText(field.get("placeholder", ""))
+                self._beam_change_fields.append((input_widget, field))
+
+    def _apply_beam_change_controls(self):
+        self._beam_change_values = {}
+        for input_widget, field in self._beam_change_fields:
+            text = input_widget.text().strip()
+            if not text and field.get("allow_empty", False):
+                setattr(self.interface, field["attribute"], None)
+                self._beam_change_values[field["attribute"]] = None
+                input_widget.setStyleSheet("")
+                continue
+            try:
+                value = float(text)
+            except ValueError:
+                input_widget.setStyleSheet("QLineEdit { border: 1px solid #c62828; }")
+                QMessageBox.warning(self, "Invalid beam-change setting", f"{field['label']} must be a number.")
+                return False
+            input_widget.setStyleSheet("")
+            setattr(self.interface, field["attribute"], value)
+            self._beam_change_values[field["attribute"]] = value
+        return True
+
+    def _load_beam_change_values(self, values):
+        for input_widget, field in self._beam_change_fields:
+            attribute = field["attribute"]
+            if attribute not in values:
+                continue
+            value = values[attribute]
+            input_widget.setText("" if value is None else str(value))
+        return self._apply_beam_change_controls()
+
     def _restore_initial_settings(self):
         self.log("Restoring initial settings...")
         self._cancel = True
         self._running = False
-        w1, w2, w3, rcond, iters, gain, beta, transmission_threshold = self._read_params()
-        if w2 >0:
-            self.interface.reset_energy()
-        if w3 > 0:
-            self.interface.reset_intensity()
-        self.interface.restore_correctors_state(self.restore_state)
+        w1, w2, w3, rcond, iters, gain, beta, transmission_threshold= self._read_params()
+        try:
+            if w2 > 0:
+                self.interface.reset_energy()
+            if w3 > 0:
+                self.interface.reset_intensity()
+        except Exception:
+            self.log(f"The machine wasn't restored to its nominal state.")
+            QMessageBox.critical(self, "Restore error",
+                                 f"Could not confirm the machine returned to its nominal energy/intensity.")
+        if self.interface.restore_correctors_state(self.restore_state) is False:
+            self.log("Warning: not every corrector was confirmed back at its saved current.")
+            QMessageBox.warning(
+                self, "Restore initial settings",
+                "Some correctors were not confirmed back at their saved current within the "
+                "readback tolerance. Check them on the machine before the next correction.",
+            )
         self.reset_ref_orb = True
         self._hist_abs_rms_x.clear(), self._hist_abs_rms_y.clear(), self._hist_abs_rms_xy.clear()
         self._clear_graphs()
@@ -380,6 +482,25 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS):
 
     def _is_v_corrector(self, s):
         return str(s) in self.vcorrector_names
+
+    def eventFilter(self, watched, event):
+        if watched is self.bpms_list.viewport():
+            if event.type() == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
+                self._bpm_weights_double_click = False
+                self._bpm_selection_before_click = self.bpms_list.selectedItems()
+            elif event.type() == QEvent.Type.MouseButtonDblClick and event.button() == Qt.MouseButton.LeftButton:
+                bpm = self.bpms_list.itemAt(event.pos())
+                if bpm is not None:
+                    self._bpm_weights_double_click = True
+                    for i in range(self.bpms_list.count()):
+                        item = self.bpms_list.item(i)
+                        item.setSelected(item in self._bpm_selection_before_click)
+                    self._edit_bpm_weights(bpm)
+                    return True
+            elif event.type() == QEvent.Type.MouseButtonRelease and self._bpm_weights_double_click:
+                self._bpm_weights_double_click = False
+                return True
+        return super().eventFilter(watched, event)
 
     def _edit_bpm_weights(self, bpm):
         bpm_name = bpm.data(Qt.ItemDataRole.UserRole) or (bpm.text() or "")
@@ -398,6 +519,8 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS):
         print("Starting button clicked...")
         self.log("Starting button clicked...")
         if not self._running:
+            if not self._apply_beam_change_controls():
+                return
             saved_state = self._save_machine_status()
             self._running = True
             self._step = True
@@ -477,6 +600,7 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS):
                 self.traj_transmission_ax = ax.twinx()
                 self.traj_transmission_ax.plot(range(len(transmission)), transmission, "g--", label="Transmission")
                 self.traj_transmission_ax.set_ylabel("Transmission [%]", color="green")
+                self.traj_transmission_ax.set_ylim(bottom=0.0)
                 self.traj_transmission_ax.tick_params(axis="y", colors="green")
                 self.traj_transmission_ax.legend(fontsize=7, loc="lower right")
         if values_x or values_y:
@@ -503,8 +627,7 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS):
         return f"[w1 = {wbpm_orb:g}, w2 = {wbpm_dfs:g}, w3 = {wbpm_wfs:g}]"  # general format, removes reduntant zeros at the end etc.
 
     def _update_bpm_weights(self, item):
-        bpm_name = item.data(Qt.ItemDataRole.UserRole) or (
-                    item.text() or "")  # it gives a clean name of the item, even if there is another text (like weights)
+        bpm_name = item.data(Qt.ItemDataRole.UserRole) or (item.text() or "")  # it gives a clean name of the item, even if there is another text (like weights)
         item.setData(BpmWeightsDelegate.WEIGHTS_ROLE, self._get_bpm_weights_text(bpm_name))
         item.setText(bpm_name)
 
@@ -741,7 +864,7 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS):
             if self.remove_coupling_checkbox.isChecked():
                 Axy_base.fill(0.0)
                 Ayx_base.fill(0.0)
-                
+
             bpms = list(bpms_common)
 
             n = len(bpms)
@@ -788,8 +911,19 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS):
             adaptive_orbit_only = self.use_adaptive_R and w1 > 0 and w2 == 0 and w3 == 0
             if not adaptive_orbit_only:
                 self._adaptive_R = None
+            if w2 > 0:
+                self.interface.reset_energy()
+            if w3 > 0:
+                self.interface.reset_intensity()
 
-            for it in range(iters):
+            samples_dir = os.path.join(self._session_dir, "BBA_states")
+            os.makedirs(samples_dir, exist_ok=True)
+            last_completed_iteration = None
+            prev_Dx = None
+            prev_Dy = None
+            prev_applied_kick = None
+
+            for it in range(iters + 1):
                 if self._cancel:
                     break
                 self._step = False
@@ -799,6 +933,8 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS):
                 self.log("Measuring orbit")
                 state0 = self.interface.get_state()
                 state0 = self._apply_jitter_subtraction_to_state(state0)
+                nominal_file = os.path.join(samples_dir, f"ITER_{it:04d}_nominal.pkl")
+                state0.save(filename=nominal_file)
                 if hasattr(self.interface, "chosen_ict"):
                     charge = np.asarray(state0.get_icts(self.interface.chosen_ict)["charge"], dtype=float).ravel()
                     if charge.size and np.isfinite(charge[0]) and charge[0] != 0:
@@ -808,7 +944,8 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS):
                         self._hist_transmission.append(100.0 * charge[0] / reference)
                         if self._hist_transmission[-1] <= transmission_threshold:
                             self._stop_correction()
-                            QMessageBox.warning(self, "Transmission below level!", "Transmission has reached the threshold. Stoping the correction now, and leaving correctors at current values.")
+                            QMessageBox.warning(self, "Transmission below level!",
+                                                "Transmission has reached the threshold. Stoping the correction now, and leaving correctors at current values.")
                     else:
                         self._hist_transmission.append(np.nan)
                 if it == 0:
@@ -825,7 +962,7 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS):
                             print(f"Emitt y for screen {screen_name}: {tw['emitt_y']}")
                         else:
                             pass
-                O0 = state0.get_orbit(bpms)  # because axis=1 is mean from one whole measurement, not for 1 bpm
+                O0 = state0.get_orbit(bpms)
                 O0x = np.asarray(O0['x'], dtype=float).reshape(-1, 1)
                 O0y = np.asarray(O0['y'], dtype=float).reshape(-1, 1)
                 orbit_now = np.concatenate([O0x, O0y]).ravel()
@@ -847,26 +984,30 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS):
                 UNCOMMENT AFTER SANITY CHECKS 
                 '''
 
-                if it==0:
-                    B0x = O0x
-                    B0y = O0y
-
-                # if it == 0:
-                #     B0x = np.asarray(B0x, dtype=float).reshape(-1, 1)
-                #     B0y = np.asarray(B0y, dtype=float).reshape(-1, 1)
-                #     print("||O0x - B0x|| =", np.linalg.norm(O0x - B0x))
-                #     print("||O0y - B0y|| =", np.linalg.norm(O0y - B0y))
-                #     self.log(
-                #         f"Initial orbit error from reference: "
-                #         f"x={np.linalg.norm(O0x - B0x):.6g}, "
-                #         f"y={np.linalg.norm(O0y - B0y):.6g}"
-                #     )
+                if it == 0:
+                    if self.orbit_at_first_start_click_x is None and self.orbit_at_first_start_click_y is None:
+                        B0x = O0x.copy()
+                        B0y = O0y.copy()
+                        self.orbit_at_first_start_click_x = B0x
+                        self.orbit_at_first_start_click_y = B0y
+                    else:
+                        B0x = self.orbit_at_first_start_click_x
+                        B0y = self.orbit_at_first_start_click_y
 
                 if self.reset_ref_orb == True:
                     B0x = O0x.copy()
                     B0y = O0y.copy()
                     self.reset_ref_orb = False
                     self.log("Reference orbit reset to current orbit")
+
+                if w1 > 0 and (O0x.shape != B0x.shape or O0y.shape != B0y.shape):
+                    self.setWindowTitle("BBA GUI")
+                    QMessageBox.warning(
+                        self, "BPM selection changed",
+                        "The number of selected BPMs differs from the saved reference orbit.\n"
+                        "Restore the previous BPM selection or click Reset reference orbit, then start again.",
+                    )
+                    return
 
                 # dfs
                 if w2 > 0:
@@ -875,6 +1016,8 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS):
                     dP_P = self.interface.change_energy()
                     state1 = self.interface.get_state()
                     state1 = self._apply_jitter_subtraction_to_state(state1)
+                    energy_file = os.path.join(samples_dir, f"ITER_{it:04d}_energy.pkl")
+                    state1.save(filename=energy_file)
                     self.interface.reset_energy()
                     O1 = state1.get_orbit(bpms)
                     O1x = np.asarray(O1['x'], dtype=float).reshape(-1, 1)
@@ -882,13 +1025,15 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS):
                     bpms1 = state1.get_bpms(bpms)
                     x1_vals = np.asarray(bpms1["x"], dtype=float)
                     y1_vals = np.asarray(bpms1["y"], dtype=float)
-                    err_dx = np.sqrt(np.square(np.asarray(O0["stdx"], dtype=float)) / x0_vals.shape[0] + np.square(np.asarray(O1["stdx"], dtype=float)) / x1_vals.shape[0])
-                    err_dy = np.sqrt(np.square(np.asarray(O0["stdy"], dtype=float)) / y0_vals.shape[0] + np.square(np.asarray(O1["stdy"], dtype=float)) / y1_vals.shape[0])
+                    err_dx = np.sqrt(np.square(np.asarray(O0["stdx"], dtype=float)) / x0_vals.shape[0] + np.square(
+                        np.asarray(O1["stdx"], dtype=float)) / x1_vals.shape[0])
+                    err_dy = np.sqrt(np.square(np.asarray(O0["stdy"], dtype=float)) / y0_vals.shape[0] + np.square(
+                        np.asarray(O1["stdy"], dtype=float)) / y1_vals.shape[0])
                     Dx = np.array([1e3 * dx * dP_P for dx in target_disp_x]).reshape(-1, 1)
                     Dy = np.array([1e3 * dy * dP_P for dy in target_disp_y]).reshape(-1, 1)
                     plt.clf()
-                    plt.plot(Dx, '--', color='tab:blue', label="target dispersion x")
-                    plt.plot(Dy, '--', color='tab:orange', label="target dispersion y")
+                    plt.plot(Dx, '--', color='blue', label="target dispersion x")
+                    plt.plot(Dy, '--', color='orange', label="target dispersion y")
                 else:
                     O1x = O1y = None
                     Dx = Dy = None
@@ -900,6 +1045,8 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS):
                     self.interface.change_intensity()
                     state2 = self.interface.get_state()
                     state2 = self._apply_jitter_subtraction_to_state(state2)
+                    intensity_file = os.path.join(samples_dir, f"ITER_{it:04d}_intensity.pkl")
+                    state2.save(filename=intensity_file)
                     self.interface.reset_intensity()
                     O2 = state2.get_orbit(bpms)
                     O2x = np.asarray(O2['x'], dtype=float).reshape(-1, 1)
@@ -917,6 +1064,8 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS):
                     "O0y": np.asarray(O0y).reshape(-1),
                     "O1y": None if O1y is None else np.asarray(O1y).reshape(-1),
                     "O2y": None if O2y is None else np.asarray(O2y).reshape(-1),
+                    "dfs_err_x": None if w2 <= 0 else np.asarray(err_dx).reshape(-1),
+                    "dfs_err_y": None if w2 <= 0 else np.asarray(err_dy).reshape(-1),
                 }
                 if not hasattr(self, "rms_orbits_data") or self.rms_orbits_data is None:
                     self.rms_orbits_data = {}
@@ -947,18 +1096,17 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS):
                 if w1 > 0:
                     Bx.append(wgt_orb * (O0x - B0x))
                     By.append(wgt_orb * (O0y - B0y))
-
                 if w2 > 0 and O1x is not None:
-
                     plt.errorbar(range(len(O1x)), (O1x - O0x).ravel(), yerr=err_dx,
-                                 color='tab:blue', label="measured x", capsize=3)
+                                 color='blue', label="measured x", capsize=3)
                     plt.errorbar(range(len(O1y)), (O1y - O0y).ravel(), yerr=err_dy,
-                                 color='tab:orange', label="measured y", capsize=3)
+                                 color='orange', label="measured y", capsize=3)
                     plt.xlabel("BPM index")
                     plt.ylabel(f"Orbit difference [{self.bpm_unit}]")
-                    plt.title("DFS: measured orbit difference vs target dispersion (x, y)")
+                    plt.title(f"DFS: measured orbit difference vs target dispersion (x, y): iteration {it + 1}/{iters}")
                     plt.legend()
                     plt.grid(True, alpha=0.3)
+                    dfs_plot_ax = plt.gca()  # get current axis, don't mistake for other plot
                     Bx.append(wgt_dfs * ((O1x - O0x) - Dx))
                     By.append(wgt_dfs * ((O1y - O0y) - Dy))
 
@@ -1060,7 +1208,8 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS):
                         for name, target, actual in zip(selected_correctors, current_bdes, current_bact)
                         if abs(actual - target) > readback_tolerance
                     ]
-                    raise RuntimeError("Corrector readback differs from its setpoint before correction: " + ", ".join(failed))
+                    raise RuntimeError(
+                        "Corrector readback differs from its setpoint before correction: " + ", ".join(failed))
 
                 max_vals_x = np.full(delta_x.shape, max_curr_h, dtype=float)
                 max_vals_y = np.full(delta_y.shape, max_curr_v, dtype=float)
@@ -1073,7 +1222,8 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS):
                     after_corrs = self.interface.get_correctors(selected_correctors)
                     after_names = list(after_corrs["names"])
                     after_bact_map = {
-                        name: val for name, val in zip(after_names, np.asarray(after_corrs["bact"], dtype=float).ravel())
+                        name: val for name, val in
+                        zip(after_names, np.asarray(after_corrs["bact"], dtype=float).ravel())
                     }
                     after_bact = np.array([after_bact_map[name] for name in selected_correctors], dtype=float)
                     if set_ok is not False and np.allclose(after_bact, new_bdes, rtol=0.0, atol=readback_tolerance):
@@ -1085,7 +1235,9 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS):
                         for name, target, actual in zip(selected_correctors, new_bdes, after_bact)
                         if abs(actual - target) > readback_tolerance
                     ]
-                    raise RuntimeError("BBA stopped: correctors did not reach their requested currents (the correction is not reliable): " + ", ".join(failed))
+                    raise RuntimeError(
+                        "BBA stopped: correctors did not reach their requested currents (the correction is not reliable): " + ", ".join(
+                            failed))
 
                 after_names = list(after_corrs["names"])
                 after_vals = np.asarray(after_corrs["bdes"], dtype=float).ravel()
@@ -1098,16 +1250,32 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS):
                 print("after_bdes =", after_bdes)
                 applied_delta = after_bdes - current_bdes
                 print("applied_delta =", applied_delta)
+
+                if w2 > 0 and O1x is not None and O1y is not None and prev_Dx is not None and prev_Dy is not None:
+                    dfs_start = n if w1 > 0 else 0
+                    dfs_rows = slice(dfs_start, dfs_start + n)  # slice of an array start:end
+                    applied_x = applied_delta[:nh]
+                    applied_y = applied_delta[nh:]
+                    dfs_prediction_x = (
+                                prev_Dx + (Axx_it[dfs_rows, :] @ applied_x + Axy_it[dfs_rows, :] @ applied_y) / wgt_dfs)
+                    dfs_prediction_y = (
+                                prev_Dy + (Ayx_it[dfs_rows, :] @ applied_x + Ayy_it[dfs_rows, :] @ applied_y) / wgt_dfs)
+                    dfs_plot_ax.plot(range(n), dfs_prediction_x, color="blue", linestyle="--", label="R prediction x")
+                    dfs_plot_ax.plot(range(n), dfs_prediction_y, color="orange", linestyle="--", label="R prediction y")
+                    dfs_plot_ax.legend()
+                    dfs_plot_ax.figure.canvas.draw_idle()
                 if adaptive_orbit_only:
                     self._adaptive_R_prev_kick = applied_delta.copy()
                     self._adaptive_R_prev_orbit = orbit_now
+
                 kicks_path = os.path.join(self._session_dir, "kicks.txt")
                 write_header = not os.path.exists(kicks_path)
                 with open(kicks_path, "a") as file:
                     if write_header:
                         file.write("time\titeration\tcorrector\tbdes_before\tapplied_kick\tbdes_after\n")
                     time = datetime.now().isoformat(timespec="seconds")
-                    for corrector, before, kick, after in zip(selected_correctors, current_bdes, applied_delta, after_bdes):
+                    for corrector, before, kick, after in zip(selected_correctors, current_bdes, applied_delta,
+                                                              after_bdes):
                         file.write(f"{time}\t{it + 1}\t{corrector}\t{before:.12g}\t{kick:.12g}\t{after:.12g}\n")
                 # new bdes and after bdes should be the same
 
@@ -1128,6 +1296,8 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS):
                 if w2 > 0 and O1x is not None and O1y is not None:
                     dx_disp = x1_vals - x0_vals
                     dy_disp = y1_vals - y0_vals
+                    prev_Dx = (O1x - O0x).ravel()
+                    prev_Dy = (O1y - O0y).ravel()
                     mean_disp_x, mean_disp_y, err_disp_x, err_disp_y, mean_disp_all, err_disp_all = self._calc_error(
                         dx_disp, dy_disp, ref_x=np.zeros(dx_disp.shape[1]), ref_y=np.zeros(dy_disp.shape[1]),
                         disp_x=Dx.ravel(), disp_y=Dy.ravel())
@@ -1160,11 +1330,21 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS):
                                   values_y=self._hist_wake_y, vals=self._hist_wake, error_x=self._hist_wake_x_err,
                                   error_y=self._hist_wake_y_err, error_all=self._hist_wake_err, title=None)
                 QApplication.processEvents()
+                last_completed_iteration = it
 
             self.setWindowTitle("BBA GUI")
             if not silent:
                 QMessageBox.information(self, "Correction", "Correction finished.")
             final_state = self.interface.get_state()
+            final_machine_status_file = os.path.join(self._session_dir, "machine_status_after_correction.pkl")
+            final_state.save(filename=final_machine_status_file)
+            self.log(f"Saved machine status after correction: {os.path.basename(final_machine_status_file)}")
+            final_state = self._apply_jitter_subtraction_to_state(final_state)
+            if last_completed_iteration is not None:
+                final_nominal_file = os.path.join(
+                    samples_dir, f"ITER_{last_completed_iteration + 1:04d}_nominal.pkl")
+                final_state.save(filename=final_nominal_file)
+                self.log(f"Saved final nominal BBA state: {os.path.basename(final_nominal_file)}")
             screens_f = final_state.get_screens()
             print("Screen values after correction:")
             print(f"Sigx: {screens_f['sigx']}")
@@ -1201,7 +1381,9 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS):
             else:
                 self.log("Correction finished.")
             if not silent:
-                self.save_session_settings(w1, w2, w3, rcond, iters, gain, beta, self.max_horizontal_current_spinbox.value(), self.max_vertical_current_spinbox.value(),
+                self.save_session_settings(w1, w2, w3, rcond, iters, gain, beta,
+                                           self.max_horizontal_current_spinbox.value(),
+                                           self.max_vertical_current_spinbox.value(),
                                            bool(self.triangular_checkbox.isChecked()), self.bpm_weights, Axx, Ayy, Axy,
                                            Ayx, Bx, By, bool(self.subtract_jitter_checkbox.isChecked()))
             if preserve_plots and plot_snapshot is not None:
@@ -1258,7 +1440,9 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS):
             self.test_orbits._plot_test_orbits(selected_bpms=self.test_orbits_data["selected_bpms"],
                                                O0x=self.test_orbits_data["O0x"], O0y=self.test_orbits_data["O0y"],
                                                O1x=self.test_orbits_data["O1x"], O1y=self.test_orbits_data["O1y"],
-                                               O2x=self.test_orbits_data["O2x"], O2y=self.test_orbits_data["O2y"])
+                                               O2x=self.test_orbits_data["O2x"], O2y=self.test_orbits_data["O2y"],
+                                               dfs_err_x=self.test_orbits_data["dfs_err_x"],
+                                               dfs_err_y=self.test_orbits_data["dfs_err_y"])
         self.test_orbits.show()
         self.test_orbits.raise_()
         self.test_orbits.activateWindow()
@@ -1369,6 +1553,7 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS):
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     from Backend import SelectInterface
+
     dialog = SelectInterface.choose_acc_and_interface()
     if dialog is None:
         print("Selection cancelled.")
@@ -1376,13 +1561,6 @@ if __name__ == "__main__":
 
     I = dialog
     project_name = I.get_name()
-
-
-    # # ================ for a test!!
-    # from Backend.State import State
-    # state = State(filename="/Users/wiktoriamalek/CERN-Flight_Simulator-Data/CLEAR_BBA_260821/BBA_CLEAR260821163644_session_settings/machine_status.pkl")
-    # I.restore_quadrupoles_state(state)
-    # # ===============================
 
     nominal_state = None
     start_state = I.get_state()

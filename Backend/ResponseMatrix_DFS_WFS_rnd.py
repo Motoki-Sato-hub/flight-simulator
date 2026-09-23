@@ -33,33 +33,41 @@ class AdaptiveResponseMatrix:
         return self.R0 + self.delta
 
 class ResponseMatrix_DFS_WFS():
-    def _compute_response_matrix_from_directory(self, directory, correctors, bpms, triangular=False, actuator_mode="correctors", rcond=None):
-        info=self._find_useful_files(directory)
+    def _compute_response_matrix_from_directory(self, directory, correctors, bpms, triangular=False, actuator_mode="correctors", rcond=1e-3, sample_kind="nominal"):
+        info = self._find_useful_files(directory, sample_kind=sample_kind)
         if not info["ok"]:
-            raise RuntimeError(f"Could not find any valid DATA pairs in {directory}")
+            raise RuntimeError(f"Could not find any valid {sample_kind} state samples in {directory}")
         return self._compute_response_matrix(pairs=info["pairs"], correctors=correctors, bpms=bpms, triangular=triangular, actuator_mode=actuator_mode, rcond=rcond)
 
-    def _find_useful_files(self, directory):
-        datafiles=sorted(glob.glob(os.path.join(directory, 'DATA*.pkl')))
-        pairs=[]
-        pair_re = re.compile(r"DATA_(.+)_(p|m)(\d+)\.pkl$")
-        for fp in datafiles:
-            basename=os.path.basename(fp)
-            match = pair_re.search(basename)
-            if not match or match.group(2) != "p":
-                continue
-            tag = match.group(1)
-            shot_index = match.group(3)
-            fm = os.path.join(os.path.dirname(fp), f"DATA_{tag}_m{shot_index}.pkl")
-            if os.path.exists(fm):
-                pairs.append((fp, fm, tag))
-        return {"ok":bool(pairs), "dir":directory, "pairs":pairs}
+    def _find_useful_files(self, directory, sample_kind="nominal"):
+        folder = os.path.abspath(os.path.expanduser(os.path.expandvars(directory or "")))
+        sample_files = sorted(glob.glob(os.path.join(folder, "SAMPLE*.pkl")))
+        if not sample_files:
+            bba_folder = os.path.join(folder, "BBA_states")
+            if not os.path.isdir(bba_folder):
+                bba_folder = folder
+            # ``.pkl*`` also accepts BBA files created before the save call
+            # used the explicit ``filename=`` keyword.
+            sample_files = sorted(glob.glob(os.path.join(bba_folder, f"ITER_*_{sample_kind}.pkl*")))
+        if not sample_files:
+            return {"ok": False, "dir": folder, "pairs": [], "sample_kind": sample_kind}
+        first_state = State(filename=sample_files[0])
+        self.sequence = first_state.get_sequence()
+        return {
+            "ok": True,
+            "dir": folder,
+            "pairs": sample_files,
+            "sample_kind": sample_kind,
+        }
 
-    def _compute_response_matrix(self, pairs, correctors, bpms, triangular=False, actuator_mode="correctors", rcond=None):
+    def _compute_response_matrix(self, pairs, correctors, bpms, triangular=False, actuator_mode="correctors", rcond=1e-3):
+        if pairs and all(isinstance(sample, (str, os.PathLike)) for sample in pairs):
+            return self._compute_response_matrix_from_samples(sample_files=pairs, correctors=correctors, bpms=bpms, triangular=triangular, actuator_mode=actuator_mode, rcond=rcond)
         if not hasattr(self, 'sequence'):
             file = pairs[0][0]
             S = State(filename=file)
             self.sequence = S.get_sequence()
+
         if actuator_mode == "quadrupole_movers":
             return self._compute_qm_response_matrix(pairs=pairs, qcorrs=correctors, bpms=bpms, triangular=triangular)
         else:
@@ -197,7 +205,7 @@ class ResponseMatrix_DFS_WFS():
         Cy = np.hstack((Cy, np.ones((Cy.shape[0], 1))))
 
         def lstsq(C, B):
-            return np.transpose(np.linalg.lstsq(C, B[:, B_mask], rcond=rcond)[0])
+            return np.transpose(np.linalg.lstsq(C, B[:, B_mask], rcond=None)[0])
 
         Rxx_ = lstsq(Cx, Bx)
         Rxy_ = lstsq(Cy, Bx)
@@ -252,12 +260,134 @@ class ResponseMatrix_DFS_WFS():
 
         return Rxx, Ryy, Rxy, Ryx, Bx, By, hcorrs, vcorrs, bpms
 
+    def _compute_response_matrix_from_samples(self, sample_files, correctors, bpms, triangular=False, actuator_mode="correctors", rcond=1e-3):
+        first_state = State(filename=sample_files[0])
+        self.sequence = first_state.get_sequence()
+        sequence_index = {str(name): i for i, name in enumerate(self.sequence)}
+
+        correctors = [str(corr) for corr in correctors]
+        bpms = [str(bpm) for bpm in bpms]
+        hcorrectors = set(map(str, first_state.hcorrectors_names))
+        vcorrectors = set(map(str, first_state.vcorrectors_names))
+        hcorrs = [corr for corr in correctors if corr in hcorrectors]
+        vcorrs = [corr for corr in correctors if corr in vcorrectors]
+
+        last_bpm_index = sequence_index.get(bpms[-1])
+        if last_bpm_index is not None:
+            hcorrs = [corr for corr in hcorrs if sequence_index.get(corr, np.inf) < last_bpm_index]
+            vcorrs = [corr for corr in vcorrs if sequence_index.get(corr, np.inf) < last_bpm_index]
+        if hcorrs:
+            first_hcorr_index = sequence_index.get(hcorrs[0], -np.inf)
+            bpms = [bpm for bpm in bpms if sequence_index.get(bpm, -np.inf) > first_hcorr_index]
+        if vcorrs:
+            first_vcorr_index = sequence_index.get(vcorrs[0], -np.inf)
+            bpms = [bpm for bpm in bpms if sequence_index.get(bpm, -np.inf) > first_vcorr_index]
+        if not bpms:
+            raise RuntimeError("No selected BPM is downstream of the selected correctors.")
+
+        def ordered_readbacks(state, names):
+            data = state.get_correctors(names)
+            by_name = {
+                str(name): value
+                for name, value in zip(data["names"], np.asarray(data["bact"], dtype=float).ravel())
+            }
+            return np.asarray([by_name.get(name, np.nan) for name in names], dtype=float)
+
+        bx_rows, by_rows, cx_rows, cy_rows = [], [], [], []
+        for sample_file in sample_files:
+            state = State(filename=sample_file)
+            orbit = state.get_orbit(bpms)
+            if not np.any(np.isfinite(orbit["x"])) or not np.any(np.isfinite(orbit["y"])):
+                print(f"Skipping all-NaN sample: {os.path.basename(sample_file)}")
+                continue
+            bx_rows.append(np.asarray(orbit["x"], dtype=float))
+            by_rows.append(np.asarray(orbit["y"], dtype=float))
+            cx_rows.append(ordered_readbacks(state, hcorrs))
+            cy_rows.append(ordered_readbacks(state, vcorrs))
+
+        if len(bx_rows) < 2:
+            raise RuntimeError("At least two valid state samples are required for response-matrix fitting.")
+
+        Bx = np.vstack(bx_rows)
+        By = np.vstack(by_rows)
+        Cx = np.vstack(cx_rows)
+        Cy = np.vstack(cy_rows)
+
+        def varying_columns(values):
+            if values.shape[1] == 0:
+                return np.zeros(0, dtype=bool)
+            finite = np.all(np.isfinite(values), axis=0)
+            span = np.nanmax(values, axis=0) - np.nanmin(values, axis=0)
+            scale = np.maximum(1.0, np.nanmax(np.abs(values), axis=0))
+            return finite & (span > 1e-12 * scale)
+
+        hmask = varying_columns(Cx)
+        vmask = varying_columns(Cy)
+        hcorrs = [corr for corr, keep in zip(hcorrs, hmask) if keep]
+        vcorrs = [corr for corr, keep in zip(vcorrs, vmask) if keep]
+        Cx = Cx[:, hmask]
+        Cy = Cy[:, vmask]
+        if not hcorrs and not vcorrs:
+            raise RuntimeError("No selected corrector changed across the available state samples.")
+
+        complete_rows = np.all(np.isfinite(Cx), axis=1) & np.all(np.isfinite(Cy), axis=1)
+        Bx, By, Cx, Cy = Bx[complete_rows], By[complete_rows], Cx[complete_rows], Cy[complete_rows]
+        if len(Bx) < 2:
+            raise RuntimeError("No two samples have complete corrector readbacks.")
+
+        bpm_mask = np.all(np.isfinite(Bx), axis=0) & np.all(np.isfinite(By), axis=0)
+        if not np.any(bpm_mask):
+            raise RuntimeError("No BPM has complete orbit data across the state samples.")
+
+        def fit_response(corrector_values, orbit_values):
+            corrector_kicks = np.column_stack((corrector_values, np.ones(len(corrector_values)))) # correctors during BBA correction
+            R = np.linalg.lstsq(corrector_kicks, orbit_values[:, bpm_mask], rcond=rcond)[0]
+            return R[:-1].T
+
+        Rxx_fit = fit_response(Cx, Bx)
+        Rxy_fit = fit_response(Cy, Bx)
+        Ryx_fit = fit_response(Cx, By)
+        Ryy_fit = fit_response(Cy, By)
+
+        n_bpms = len(bpms)
+        Rxx = np.full((n_bpms, len(hcorrs)), np.nan)
+        Rxy = np.full((n_bpms, len(vcorrs)), np.nan)
+        Ryx = np.full((n_bpms, len(hcorrs)), np.nan)
+        Ryy = np.full((n_bpms, len(vcorrs)), np.nan)
+        Rxx[bpm_mask, :] = Rxx_fit
+        Rxy[bpm_mask, :] = Rxy_fit
+        Ryx[bpm_mask, :] = Ryx_fit
+        Ryy[bpm_mask, :] = Ryy_fit
+
+        if triangular:
+            for corr_index, corr in enumerate(hcorrs):
+                upstream = [i for i, bpm in enumerate(bpms) if sequence_index.get(bpm, np.inf) < sequence_index.get(corr, -np.inf)]
+                Rxx[upstream, corr_index] = 0.0
+                Ryx[upstream, corr_index] = 0.0
+            for corr_index, corr in enumerate(vcorrs):
+                upstream = [i for i, bpm in enumerate(bpms) if sequence_index.get(bpm, np.inf) < sequence_index.get(corr, -np.inf)]
+                Rxy[upstream, corr_index] = 0.0
+                Ryy[upstream, corr_index] = 0.0
+
+        return (
+            Rxx,
+            Ryy,
+            Rxy,
+            Ryx,
+            np.nanmean(Bx, axis=0).reshape(-1, 1),
+            np.nanmean(By, axis=0).reshape(-1, 1),
+            hcorrs,
+            vcorrs,
+            bpms,
+        )
+
     @staticmethod
     def _dataset_beam_signature(pairs):
         if not pairs:
             return {}
         try:
-            state = State(filename=pairs[0][0])
+            first_sample = pairs[0] if isinstance(pairs[0], (str, os.PathLike)) else pairs[0][0]
+            state = State(filename=first_sample)
             settings = state.get_beam_settings() or {}
         except Exception:
             return {}
@@ -303,12 +433,11 @@ class ResponseMatrix_DFS_WFS():
         return all(values_equal(signature_a[key], signature_b[key]) for key in common_keys)
 
     def _get_data_from_loaded_directories(self, selected_bpms, selected_corrs, _force_triangular=False):
-
         info_traj = self._data_dirs.get("traj")
         info_dfs = self._data_dirs.get("dfs")
         info_wfs = self._data_dirs.get("wfs")
 
-        w1, w2, w3, rcond, iters, gain, beta, transmission_threshold= self._read_params()
+        w1, w2, w3, rcond, iters, gain, beta, transmission_threshold = self._read_params()
 
         if not (info_traj and info_traj["ok"]):
             raise RuntimeError("Please select a trajectory data directory")
@@ -368,7 +497,7 @@ class ResponseMatrix_DFS_WFS():
             bpms = list(selected_bpms)
 
 
-        w1, w2, w3, rcond, iters, gain, beta, transmission_threshold= self._read_params()
+        w1, w2, w3, rcond, iters, gain, beta, transmission_threshold = self._read_params()
         wgt_orb, wgt_dfs, wgt_wfs = w1, w2, w3
 
         #corrs, bpms = self._get_selection()

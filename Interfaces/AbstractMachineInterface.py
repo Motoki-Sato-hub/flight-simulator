@@ -24,6 +24,14 @@ class AbstractMachineInterface(ABC):
         )
         return False
 
+    def _set_and_verify(self, apply, read_value, target, *, description, tolerance=1e-4, timeout=10.0, retries=3):
+        for attempt in range(1, retries + 1):
+            apply()
+            if self._wait_for_readback(read_value, target, description=description, tolerance=tolerance, timeout=timeout):
+                return True
+            getattr(self, "log", print)(f"{description}: retrying (attempt {attempt}/{retries})")
+        raise RuntimeError(f"{description}: failed to reach target {float(target):.6g} after {retries} attempts.")
+
     @abstractmethod
     def get_name(self):
         pass
@@ -63,6 +71,10 @@ class AbstractMachineInterface(ABC):
 
     def get_screens(self, names=None):
         return {"names": [], "hpixel": np.array([]), "vpixel": np.array([]), "x":np.array([]),"y":np.array([]), "sigx":np.array([]), "sigy":np.array([]),"sum":np.array([]),"hedges":[],"vedges":[],"images":[],"S":np.array([])}
+
+    def match_screen_name(self, name, candidates):
+        name = str(name)
+        return name if name in map(str, candidates) else None
 
     def get_target_dispersion(self, names=None):
         if names is None:
@@ -135,7 +147,7 @@ class AbstractMachineInterface(ABC):
 
     def restore_correctors_state(self, state):
         correctors = state.get_correctors()
-        self.set_correctors(correctors["names"], correctors["bdes"])
+        return self.set_correctors(correctors["names"], correctors["bdes"])
 
     def restore_quadrupoles_state(self, state):
         quadrupoles = state.get_quadrupoles()

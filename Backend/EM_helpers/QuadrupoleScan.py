@@ -36,7 +36,60 @@ class QuadrupoleScan(SaveOrLoad):
         os.makedirs(session_dir, exist_ok=True)
         return session_dir
 
-    def run_scan(self, quad_name, screens, delta_min, delta_max, steps, nshots, reference_screen=None, progress_callback=None):
+    def _quad_value_unit(self, quad_name):
+        quadrupoles = self.interface.get_quadrupoles([quad_name])
+        return str(quadrupoles.get("value_unit", "1/m"))
+
+    def current_to_quad_setpoint(self, quad_name, current_A, quad_value_unit):
+        if quad_value_unit == "A":
+            return float(current_A)
+        current_to_k1l = getattr(self.interface, "current_to_k1l", None)
+        if not callable(current_to_k1l):
+            raise ValueError(
+                f"{self.interface.get_name()} sets quadrupoles in {quad_value_unit}, but it has no "
+                f"current_to_k1l() calibration, so a scan range given in amperes cannot be applied.")
+        return float(current_to_k1l(quad_name, float(current_A)))
+
+    def quad_setpoint_to_current(self, quad_name, value, quad_value_unit):
+        if quad_value_unit == "A":
+            return float(value)
+        k1l_to_current = getattr(self.interface, "k1l_to_current", None)
+        if not callable(k1l_to_current):
+            return np.nan
+        try:
+            return float(k1l_to_current(quad_name, float(value)))
+        except Exception:
+            return np.nan
+
+    @staticmethod
+    def _unique_scan_values(values, relative_tolerance=1e-4):
+        values = np.asarray(sorted(float(value) for value in np.ravel(values)), dtype=float)
+        if values.size == 0:
+            return values
+        tolerance = max(abs(float(values[-1] - values[0])) * relative_tolerance, 1e-12)
+        grouped = [float(values[0])]
+        for value in values[1:]:
+            if float(value) - grouped[-1] > tolerance:
+                grouped.append(float(value))
+        return np.asarray(grouped, dtype=float)
+
+    def _scan_grid_per_screen(self, quad_name, screens, current_min, current_max, steps, quad_value_unit, screen_current_ranges=None):
+        screen_current_ranges = dict(screen_current_ranges or {})
+        currents_per_screen, values_per_screen = [], []
+        for screen_name in screens:
+            low, high = screen_current_ranges.get(screen_name, (current_min, current_max))
+            low, high = float(low), float(high)
+            if high <= low:
+                raise ValueError(f"Maximum current must be larger than minimum current for screen {screen_name}")
+            currents = np.linspace(low, high, int(steps))
+            currents_per_screen.append(currents)
+            values_per_screen.append(np.array([self.current_to_quad_setpoint(quad_name, current, quad_value_unit) for current in currents], dtype=float))
+
+        quad_values = self._unique_scan_values(np.concatenate(values_per_screen))
+        rows_per_screen = [np.array([int(np.argmin(np.abs(quad_values - value))) for value in values]) for values in values_per_screen]
+        return quad_values, values_per_screen, currents_per_screen, rows_per_screen
+
+    def run_scan(self, quad_name, screens, current_min, current_max, steps, nshots, screen_current_ranges=None, reference_screen=None, progress_callback=None, resume_states_dir=None):
         steps = int(steps)
         if isinstance(quad_name, str):
             quad_names = [quad_name]
@@ -46,19 +99,27 @@ class QuadrupoleScan(SaveOrLoad):
         if len(quad_names) == 0:
             raise ValueError("At least one quadrupole must be provided")
 
-        self.dir_name = self._new_scan_session_dir(quad_names=quad_names, is_quad_scan=(steps > 0))
+        if resume_states_dir:
+            self.dir_name = os.path.dirname(os.path.normpath(resume_states_dir))
+        else:
+            self.dir_name = self._new_scan_session_dir(quad_names=quad_names, is_quad_scan=(steps > 0))
         self.session_directory.setText(self.dir_name)
+        preserve_status = getattr(self, "_preserve_quadrupole_status_files", None)
+        if callable(preserve_status):
+            preserve_status(self.dir_name)
 
         if steps == 0:
             if len(quad_names) != 1:
                 raise ValueError("For Linear Response, choose exactly one quadrupole.")
             return self._run_single_scan(quad_name=quad_names[0], screens=screens,
-                delta_min=0.0, delta_max=0.0, steps=0, nshots=nshots,
+                current_min=0.0, current_max=0.0, steps=0, nshots=nshots,
                 reference_screen=reference_screen, progress_callback=progress_callback)
 
         if len(quad_names) == 1:
             print(f"{quad_names[0]} is going to be scanned")
-            return self._run_single_scan(quad_name=quad_names[0], screens=screens, delta_min=delta_min, delta_max=delta_max, steps=steps, nshots=nshots, reference_screen=reference_screen, progress_callback=progress_callback)
+            return self._run_single_scan(quad_name=quad_names[0], screens=screens, current_min=current_min, current_max=current_max,
+                steps=steps, nshots=nshots, screen_current_ranges=screen_current_ranges,
+                reference_screen=reference_screen, progress_callback=progress_callback, resume_states_dir=resume_states_dir)
 
         per_quad_sessions = []
         cancelled = False
@@ -87,12 +148,13 @@ class QuadrupoleScan(SaveOrLoad):
                     progress_callback(merged_partial, i, nsteps)
 
             try:
-                single_session = self._run_single_scan(quad_name=quad_name, screens=screens, delta_min=delta_min, delta_max=delta_max,
-                    steps=steps, nshots=nshots, reference_screen=reference_screen, progress_callback=_wrapped_progress)
+                single_session = self._run_single_scan(quad_name=quad_name, screens=screens, current_min=current_min, current_max=current_max,
+                    steps=steps, nshots=nshots, screen_current_ranges=screen_current_ranges,
+                    reference_screen=reference_screen, progress_callback=_wrapped_progress)
 
             except ValueError as e:
                 msg = str(e)
-                if "zero K1L_0" in msg:
+                if "zero quadrupole value" in msg:
                     skipped_quadrupoles.append({"quad_name": quad_name, "reason": msg})
                     continue
                 raise
@@ -110,8 +172,9 @@ class QuadrupoleScan(SaveOrLoad):
             "screens": list(screens),
             "reference_screen": reference_screen if reference_screen is not None else (
                 list(screens)[0] if len(list(screens)) > 0 else None),
-            "delta_min": float(delta_min),
-            "delta_max": float(delta_max),
+            "current_A_min": float(current_min),
+            "current_A_max": float(current_max),
+            "screen_current_ranges": {str(k): [float(v[0]), float(v[1])] for k, v in dict(screen_current_ranges or {}).items()},
             "steps": int(steps),
             "is_quad_scan": bool(int(steps) > 0),
             "nsteps_scan": 1 if int(steps) == 0 else int(steps),
@@ -122,31 +185,35 @@ class QuadrupoleScan(SaveOrLoad):
             "cancelled": bool(cancelled),
         }
 
-    def _run_single_scan(self, quad_name, screens, delta_min, delta_max, steps, nshots, reference_screen=None, progress_callback=None):
+    def _run_single_scan(self, quad_name, screens, current_min, current_max, steps, nshots, screen_current_ranges=None, reference_screen=None, progress_callback=None, resume_states_dir=None):
         screens = list(screens)
         if reference_screen is None:
             reference_screen = screens[0]
         steps_requested = int(steps)
-        if steps_requested > 0 and delta_max <= delta_min:
-            raise ValueError("delta_max must be larger than delta_min")
         screens = [reference_screen] + [s for s in screens if s != reference_screen] # so that reference screen is first on the list
 
-        quad_names = list(getattr(self.interface, "quadrupoles", []))
         quadrupoles = self.interface.get_quadrupoles([quad_name])
+        quad_value_unit = str(quadrupoles.get("value_unit", "1/m"))
+        quad_value_label = "current" if quad_value_unit == "A" else "K1L"
         bdes = np.asarray(quadrupoles.get("bdes", []), dtype=float)
         K1L_0 = float(bdes[0])
-
-        if steps_requested > 0 and np.isclose(K1L_0, 0.0):
-            raise ValueError("The quadrupole has zero K1L_0. You should choose another one.")
+        current_0 = self.quad_setpoint_to_current(quad_name, K1L_0, quad_value_unit)
 
         if steps_requested == 0:
-            deltas = np.array([0.0], dtype=float)
-            K1L_values = np.array([K1L_0], dtype=float)
+            quad_values = np.array([K1L_0], dtype=float)
+            values_per_screen = [quad_values.copy() for _ in screens]
+            currents_per_screen = [np.array([current_0], dtype=float) for _ in screens]
+            rows_per_screen = [np.array([0]) for _ in screens]
         else:
-            deltas = np.linspace(float(delta_min), float(delta_max), steps_requested)
-            K1L_values = K1L_0 * (1 + deltas)
+            quad_values, values_per_screen, currents_per_screen, rows_per_screen = self._scan_grid_per_screen(
+                quad_name=quad_name, screens=screens, current_min=current_min, current_max=current_max,
+                steps=steps_requested, quad_value_unit=quad_value_unit, screen_current_ranges=screen_current_ranges)
+
+        K1L_values = quad_values
+        currents_scanned = np.array([self.quad_setpoint_to_current(quad_name, value, quad_value_unit) for value in quad_values], dtype=float)
         nsteps_scan = len(K1L_values)
         nscreens = len(screens)
+        deltas = K1L_values / K1L_0 - 1.0 if np.isfinite(K1L_0) and not np.isclose(K1L_0, 0.0) else np.full(nsteps_scan, np.nan)
 
         sigx_mean = np.full((nsteps_scan, nscreens), np.nan, dtype=float)
         sigy_mean = np.full((nsteps_scan, nscreens), np.nan, dtype=float)
@@ -168,9 +235,12 @@ class QuadrupoleScan(SaveOrLoad):
         images = [[[None for _ in range(nshots)] for _ in range(nscreens)] for _ in range(nsteps_scan)]
         hedges = [[[None for _ in range(nshots)] for _ in range(nscreens)] for _ in range(nsteps_scan)]
         vedges = [[[None for _ in range(nshots)] for _ in range(nscreens)] for _ in range(nsteps_scan)]
-        output_dir = self._get_scan_dir(quad_name, steps_requested)
+        output_dir = resume_states_dir if resume_states_dir and os.path.isdir(resume_states_dir) else self._get_scan_dir(quad_name, steps_requested)
         cancel_requested = False
+        self._last_scan_states_dir = output_dir
         self.load_screens_data_database.setText(output_dir)
+        total_measurements = int(sum(len(values) for values in values_per_screen))
+        completed_measurements = 0
 
         try:
             for k, screen_name in enumerate(screens):
@@ -186,7 +256,8 @@ class QuadrupoleScan(SaveOrLoad):
                     cancel_requested = True
                     break
                 try:
-                    for i, K1L in enumerate(K1L_values):
+                    for i_local, K1L in enumerate(values_per_screen[k]):
+                        i = int(rows_per_screen[k][i_local])
                         while getattr(self, "_scan_pause_requested", False) and not getattr(self, "_scan_stop_requested", False):
                             setattr(self, "_scan_is_paused", True)
                             QApplication.processEvents()
@@ -197,66 +268,78 @@ class QuadrupoleScan(SaveOrLoad):
                         if getattr(self, "_cancel", False):
                             cancel_requested = True
                             break
-                        if steps_requested > 0:
-                            print("Before set_quadrupoles")
-                            self.interface.set_quadrupoles([quad_name], [float(K1L)])
-                            #time.sleep(1)
-                            print("After set_quadrupoles")
                         sx_shots = np.full(nshots, np.nan, dtype=float)
                         sy_shots = np.full(nshots, np.nan, dtype=float)
                         sxy_shots = np.full(nshots, np.nan, dtype=float)
                         dx_shots = np.full(nshots, np.nan, dtype=float)
                         dy_shots = np.full(nshots, np.nan, dtype=float)
                         state_files = []
-                        print("before calling get_quadrupoles")
-                        quad_data = self.interface.get_quadrupoles([quad_name])
-                        print("after calling get_quadrupoles")
-                        for j in range(nshots):
-                            while getattr(self, "_scan_pause_requested", False) and not getattr(self, "_scan_stop_requested", False):
-                                setattr(self, "_scan_is_paused", True)
-                                QApplication.processEvents()
-                                time.sleep(0.05)
-                            setattr(self, "_scan_is_paused", False)
-                            if getattr(self, "_scan_stop_requested", False):
-                                raise KeyboardInterrupt("Scan stopped by user.")
-                            if getattr(self, "_cancel", False):
-                                cancel_requested = True
-                                break
-                            print("before calling get_screens")
-                            screens_data = self.interface.get_screens([screen_name])
-                            sigma_scale = 1.0
-                            sigxy_scale = 1.0
-                            if self._get_interface_units() == "um":
-                                sigma_scale = 1.0 / 1000.0
-                                sigxy_scale = 1.0 / 1000000.0
-                            print("after calling get_screens")
-                            idx_map = {name: idx for idx, name in enumerate(screens_data["names"])}
-                            idx = idx_map.get(screen_name)
-                            if idx is not None:
-                                sx_shots[j] = float(screens_data["sigx"][idx]) * sigma_scale
-                                sy_shots[j] = float(screens_data["sigy"][idx]) * sigma_scale
-                                images[i][k][j]=np.asarray(screens_data["images"][idx])
-                                if idx < len(screens_data.get("hedges", [])):
-                                    hedges[i][k][j] = np.asarray(screens_data["hedges"][idx], dtype=float)
-                                if idx < len(screens_data.get("vedges", [])):
-                                    vedges[i][k][j] = np.asarray(screens_data["vedges"][idx], dtype=float)
-                                if "sigxy" in screens_data:
-                                    sxy_shots[j] = float(screens_data["sigxy"][idx]) * sigxy_scale
-                                if "x" in screens_data:
-                                    dx_shots[j] = float(screens_data["x"][idx]) * sigma_scale
-                                if "y" in screens_data:
-                                    dy_shots[j] = float(screens_data["y"][idx]) * sigma_scale
-                            state_for_scan = State(sextupoles=None, correctors=None, bpms=None,
-                                icts=None, sequence=self.interface.get_sequence(), hcorrectors_names=None,
-                                vcorrectors_names=None, screens=screens_data, quadrupoles=quad_data)
+                        already_measured = self._saved_measurement_files(output_dir, k, i, nshots) if resume_states_dir else None
+                        if already_measured is not None:
+                            print(f"Resuming: screen {screen_name} step {i} is already on disk, reusing it")
+                            self._fill_shots_from_saved_files(already_measured, screen_name, sx_shots, sy_shots, sxy_shots,
+                                dx_shots, dy_shots, images, hedges, vedges, i, k)
+                            state_files = list(already_measured)
+                        else:
+                            if steps_requested > 0:
+                                print("Before set_quadrupoles")
+                                reached = self.interface.set_quadrupoles([quad_name], [float(K1L)])
+                                if reached is False:
+                                    reached = self.interface.set_quadrupoles([quad_name], [float(K1L)])
+                                if reached is False:
+                                    raise RuntimeError(
+                                        f"{quad_name} did not reach requested {quad_value_label}="
+                                        f"{K1L:.6g} {quad_value_unit} (step {i}) after retry")
+                                print("After set_quadrupoles")
+                            print("before calling get_quadrupoles")
+                            quad_data = self.interface.get_quadrupoles([quad_name])
+                            print("after calling get_quadrupoles")
+                            for j in range(nshots):
+                                while getattr(self, "_scan_pause_requested", False) and not getattr(self, "_scan_stop_requested", False):
+                                    setattr(self, "_scan_is_paused", True)
+                                    QApplication.processEvents()
+                                    time.sleep(0.05)
+                                setattr(self, "_scan_is_paused", False)
+                                if getattr(self, "_scan_stop_requested", False):
+                                    raise KeyboardInterrupt("Scan stopped by user.")
+                                if getattr(self, "_cancel", False):
+                                    cancel_requested = True
+                                    break
+                                print("before calling get_screens")
+                                screens_data = self.interface.get_screens([screen_name])
+                                sigma_scale = 1.0
+                                sigxy_scale = 1.0
+                                if self._get_interface_units() == "um":
+                                    sigma_scale = 1.0 / 1000.0
+                                    sigxy_scale = 1.0 / 1000000.0
+                                print("after calling get_screens")
+                                idx_map = {name: idx for idx, name in enumerate(screens_data["names"])}
+                                idx = idx_map.get(screen_name)
+                                if idx is not None:
+                                    sx_shots[j] = float(screens_data["sigx"][idx]) * sigma_scale
+                                    sy_shots[j] = float(screens_data["sigy"][idx]) * sigma_scale
+                                    images[i][k][j]=np.asarray(screens_data["images"][idx])
+                                    if idx < len(screens_data.get("hedges", [])):
+                                        hedges[i][k][j] = np.asarray(screens_data["hedges"][idx], dtype=float)
+                                    if idx < len(screens_data.get("vedges", [])):
+                                        vedges[i][k][j] = np.asarray(screens_data["vedges"][idx], dtype=float)
+                                    if "sigxy" in screens_data:
+                                        sxy_shots[j] = float(screens_data["sigxy"][idx]) * sigxy_scale
+                                    if "x" in screens_data:
+                                        dx_shots[j] = float(screens_data["x"][idx]) * sigma_scale
+                                    if "y" in screens_data:
+                                        dy_shots[j] = float(screens_data["y"][idx]) * sigma_scale
+                                state_for_scan = State(sextupoles=None, correctors=None, bpms=None,
+                                    icts=None, sequence=self.interface.get_sequence(), hcorrectors_names=None,
+                                    vcorrectors_names=None, screens=screens_data, quadrupoles=quad_data)
 
-                            state_filename = os.path.join(output_dir, f"screen_{k:04d}_step_{i:04d}_shot_{j:04d}.pkl")
-                            state_for_scan.save(filename=state_filename)
-                            state_files.append(state_filename)
+                                state_filename = os.path.join(output_dir, f"screen_{k:04d}_step_{i:04d}_shot_{j:04d}.pkl")
+                                state_for_scan.save(filename=state_filename)
+                                state_files.append(state_filename)
 
                         if state_files:
-                            sigx_mean[i, k] = np.nanmean(sx_shots)
-                            sigy_mean[i, k] = np.nanmean(sy_shots)
+                            sigx_mean[i, k] = np.nanmedian(sx_shots)
+                            sigy_mean[i, k] = np.nanmedian(sy_shots)
                             sigxy_mean[i, k] = np.nanmean(sxy_shots)
                             sigx_std[i, k] = np.nanstd(sx_shots)
                             sigy_std[i, k] = np.nanstd(sy_shots)
@@ -277,14 +360,18 @@ class QuadrupoleScan(SaveOrLoad):
                                 "step_index": int(i),
                                 "delta": float(deltas[i]),
                                 "K1L": float(K1L),
+                                "quad_value": float(K1L),
+                                "current_A": float(currents_per_screen[k][i_local]),
                                 "state_files": [],
                             }
                             scan_steps.append(existing_step)
                         existing_step["state_files"].extend(state_files)
+                        completed_measurements += 1
 
                         session_partial = {
-                            "delta_min": float(delta_min),
-                            "delta_max": float(delta_max),
+                            "current_A_min": float(current_min),
+                            "current_A_max": float(current_max),
+                            "screen_current_ranges": {str(name): [float(currents[0]), float(currents[-1])] for name, currents in zip(screens, currents_per_screen)},
                             "steps": int(steps_requested),
                             "is_quad_scan": bool(steps_requested>0),
                             "nshots": int(nshots),
@@ -292,7 +379,9 @@ class QuadrupoleScan(SaveOrLoad):
                             "quadrupoles": [quad_name],
                             "screens": screens,
                             "reference_screen": reference_screen,
+                            "quad_value_unit": quad_value_unit,
                             "K1L_0": float(K1L_0),
+                            "current_0": float(current_0),
                             "sigx_mean": sigx_mean.tolist(),
                             "sigy_mean": sigy_mean.tolist(),
                             "sigxy_mean": sigxy_mean.tolist(),
@@ -310,6 +399,7 @@ class QuadrupoleScan(SaveOrLoad):
                             "y_shots": y_shots.tolist(),
                             "deltas": deltas.tolist(),
                             "K1L_values": K1L_values.tolist(),
+                            "current_values": currents_scanned.tolist(),
                             "scan_steps": scan_steps,
                             "states_dir": output_dir,
                             "cancelled": bool(cancel_requested),
@@ -323,9 +413,7 @@ class QuadrupoleScan(SaveOrLoad):
                         }
 
                         if progress_callback is not None:
-                            completed = k * len(K1L_values) + i + 1
-                            total = len(screens) * len(K1L_values)
-                            progress_callback(session_partial, completed, total)
+                            progress_callback(session_partial, completed_measurements, total_measurements)
                         if cancel_requested:
                             break
                     if cancel_requested:
@@ -337,11 +425,23 @@ class QuadrupoleScan(SaveOrLoad):
                         extract_screen(screen_name)
         finally:
             if steps_requested > 0 and np.isfinite(K1L_0):
-                self.interface.set_quadrupoles([quad_name], [float(K1L_0)])
+                try:
+                    restored = self.interface.set_quadrupoles([quad_name], [float(K1L_0)])
+                    if restored is False:
+                        print(
+                            f"{quad_name} did not confirm returning to its original "
+                            f"{quad_value_label}={K1L_0:.6g} {quad_value_unit} after the scan."
+                        )
+                except Exception as exc:
+                    print(
+                        f"Failed to restore {quad_name} to its original "
+                        f"{quad_value_label}={K1L_0:.6g} {quad_value_unit}: {exc}"
+                    )
 
         session = {
-            "delta_min": float(delta_min),
-            "delta_max": float(delta_max),
+            "current_A_min": float(current_min),
+            "current_A_max": float(current_max),
+            "screen_current_ranges": {str(name): [float(currents[0]), float(currents[-1])] for name, currents in zip(screens, currents_per_screen)},
             "steps": int(steps_requested),
             "is_quad_scan": bool(steps_requested > 0),
             "nshots": int(nshots),
@@ -349,7 +449,9 @@ class QuadrupoleScan(SaveOrLoad):
             "quadrupoles": [quad_name],
             "screens": screens,
             "reference_screen": reference_screen,
+            "quad_value_unit": quad_value_unit,
             "K1L_0": float(K1L_0),
+            "current_0": float(current_0),
             "sigx_mean": sigx_mean.tolist(),
             "sigy_mean": sigy_mean.tolist(),
             "sigxy_mean": sigxy_mean.tolist(),
@@ -367,6 +469,7 @@ class QuadrupoleScan(SaveOrLoad):
             "y_shots": y_shots.tolist(),
             "deltas": deltas.tolist(),
             "K1L_values": K1L_values.tolist(),
+            "current_values": currents_scanned.tolist(),
             "scan_steps": scan_steps,
             "states_dir": output_dir,
             "cancelled": bool(cancel_requested),
@@ -383,6 +486,42 @@ class QuadrupoleScan(SaveOrLoad):
             set_default_quad_strength_bounds(session)
         self.save_emittance_measurement_session(session)
         return session
+
+    @staticmethod
+    def _saved_measurement_files(output_dir, screen_index, step_index, nshots):
+        if not output_dir or not os.path.isdir(output_dir):
+            return None
+        paths = [os.path.join(output_dir, f"screen_{screen_index:04d}_step_{step_index:04d}_shot_{shot:04d}.pkl")
+                 for shot in range(int(nshots))]
+        return paths if all(os.path.isfile(path) for path in paths) else None
+
+    def _fill_shots_from_saved_files(self, paths, screen_name, sx_shots, sy_shots, sxy_shots, dx_shots, dy_shots, images, hedges, vedges, step_index, screen_index):
+        sigma_scale = 1.0
+        sigxy_scale = 1.0
+        if self._get_interface_units() == "um":
+            sigma_scale = 1.0 / 1000.0
+            sigxy_scale = 1.0 / 1000000.0
+        for shot, path in enumerate(paths):
+            screens_data = State(filename=path).get_screens()
+            names = list(screens_data.get("names", []))
+            idx = names.index(screen_name) if screen_name in names else (0 if names else None)
+            if idx is None:
+                continue
+            sx_shots[shot] = float(np.ravel(screens_data["sigx"])[idx]) * sigma_scale
+            sy_shots[shot] = float(np.ravel(screens_data["sigy"])[idx]) * sigma_scale
+            saved_images = screens_data.get("images", [])
+            if idx < len(saved_images):
+                images[step_index][screen_index][shot] = np.asarray(saved_images[idx])
+            if idx < len(screens_data.get("hedges", [])):
+                hedges[step_index][screen_index][shot] = np.asarray(screens_data["hedges"][idx], dtype=float)
+            if idx < len(screens_data.get("vedges", [])):
+                vedges[step_index][screen_index][shot] = np.asarray(screens_data["vedges"][idx], dtype=float)
+            if "sigxy" in screens_data:
+                sxy_shots[shot] = float(np.ravel(screens_data["sigxy"])[idx]) * sigxy_scale
+            if "x" in screens_data:
+                dx_shots[shot] = float(np.ravel(screens_data["x"])[idx]) * sigma_scale
+            if "y" in screens_data:
+                dy_shots[shot] = float(np.ravel(screens_data["y"])[idx]) * sigma_scale
 
     def _get_scan_dir(self,quad_name, steps_requested): # saves state files for each quadrupole
         time_str = datetime.now().strftime("%Y%m%d_%H%M%S")

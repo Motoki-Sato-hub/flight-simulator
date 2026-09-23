@@ -147,6 +147,7 @@ class InterfaceATF2_DR(AbstractMachineInterface):
         ]
         self.nominal_laser_intensity = nominal_intensity
         self.test_laser_intensity = wfs_intensity
+        self.energy_frequency_offset_khz = 4.0
         #self.laser_intensity = PV('RFGun:LasetIntensity1:Read').get()
         self.twiss_path = os.path.join(os.path.dirname(__file__), "DR_ATF2", "ATF_DR_twiss_file.tws")
 
@@ -226,34 +227,34 @@ class InterfaceATF2_DR(AbstractMachineInterface):
                 return value
         return float(default)
 
+    def _pv_readback(self, pv_name):
+        return lambda: self.make_safe_float(PV(pv_name).get(), default=np.nan)
+
     def change_energy(self):
-        PV('RAMP:CONTROL_ON_SW').put(1)
-        self._wait_for_pv_readback('RAMP:CONTROL_ON_SW', 1)
+        self._set_and_verify(lambda: PV('RAMP:CONTROL_ON_SW').put(1), self._pv_readback('RAMP:CONTROL_ON_SW'), 1, description="RAMP:CONTROL_ON_SW (energy change)", tolerance=1e-3)
         ### delta_freq MUST MATCH :MI2: to EPICS --> means "MINUS2"
-        delta_freq = +4 # kHz
+        delta_freq = float(self.energy_frequency_offset_khz)  # kHz
         # PV('RAMP:MI2:ONOFF_SW').put(1)
-        PV('RAMP:PL4:ONOFF_SW').put(1)
-        self._wait_for_pv_readback('RAMP:PL4:ONOFF_SW', 1)
+        self._set_and_verify(lambda: PV('RAMP:PL4:ONOFF_SW').put(1), self._pv_readback('RAMP:PL4:ONOFF_SW'), 1, description="RAMP:PL4:ONOFF_SW (energy change)", tolerance=1e-3)
         DR_freq = 714e3; # 714 MHz in kHz
         DR_momentum_compaction = 2.1e-3
         dP_P = -delta_freq / DR_freq / DR_momentum_compaction
         return dP_P
 
     def reset_energy(self):
-        PV('RAMP:CONTROL_OFF_SW').put(0)
-        self._wait_for_pv_readback('RAMP:CONTROL_ON_SW', 0)
+        self._set_and_verify(lambda: PV('RAMP:CONTROL_OFF_SW').put(0), self._pv_readback('RAMP:CONTROL_ON_SW'), 0, description="RAMP:CONTROL_ON_SW (energy reset)", tolerance=1e-3)
 
-    def change_intensity(self, intensity=0.1):
+    def change_intensity(self, intensity=None):
+        if intensity is None:
+            intensity = self.test_laser_intensity
         print(f'Changing laser intensity to {intensity}...')
         laser_intensity1 = 10000 * float(intensity) / self.laser_intensity2
-        PV('RFGun:LaserIntensity1:Write').put(laser_intensity1)
-        self._wait_for_pv_readback('RFGun:LaserIntensity1:Read', laser_intensity1)
+        self._set_and_verify(lambda: PV('RFGun:LaserIntensity1:Write').put(laser_intensity1), self._pv_readback('RFGun:LaserIntensity1:Read'), laser_intensity1, description="RFGun:LaserIntensity1 (intensity change)", tolerance=1e-3)
         return self
 
     def reset_intensity(self):
         print('Resetting laser intensity...')
-        PV('RFGun:LaserIntensity1:Write').put(self.laser_intensity1)
-        self._wait_for_pv_readback('RFGun:LaserIntensity1:Read', self.laser_intensity1)
+        self._set_and_verify(lambda: PV('RFGun:LaserIntensity1:Write').put(self.laser_intensity1), self._pv_readback('RFGun:LaserIntensity1:Read'), self.laser_intensity1, description="RFGun:LaserIntensity1 (intensity reset)", tolerance=1e-3)
         return self
 
     def get_beam_settings(self):

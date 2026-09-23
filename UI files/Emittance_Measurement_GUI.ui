@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>1626</width>
-    <height>1091</height>
+    <width>1568</width>
+    <height>1054</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -86,7 +86,7 @@ QGroupBox#devicesGroup::title {
             <item>
              <widget class="QToolButton" name="quad_status_tooltip">
               <property name="toolTip">
-               <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Reads the current status of all quadrupoles from the machine, converts their readbacks to K1L, and updates the in-memory RF-Track model for more accurate tracking.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+               <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Reads the quadrupole currents from the machine and synchronizes the in-memory RF-Track model through the calibrated current-to-gradient relation.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
               </property>
               <property name="styleSheet">
                <string notr="true">QToolButton#quad_status_tooltip{
@@ -100,6 +100,38 @@ QGroupBox#devicesGroup::title {
     font-weight: bold;
 }
 QToolButton#quad_status_tooltip:hover {
+    background-color: #e6e6e6;
+}</string>
+              </property>
+              <property name="text">
+               <string>?</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QPushButton" name="load_machine_status_button">
+              <property name="text">
+               <string>Load quadrupoles status...</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QToolButton" name="machine_status_tooltip">
+              <property name="toolTip">
+               <string>Pick a file with saved quadrupole currents. RF-Track will be updated with those values, so that both real machine and simulation have the same optics.</string>
+              </property>
+              <property name="styleSheet">
+               <string notr="true">QToolButton#machine_status_tooltip{
+    border: 1px solid #888;
+    border-radius: 11px;
+    min-width: 22px;
+    max-width: 22px;
+    min-height: 22px;
+    max-height: 22px;
+    padding: 0px;
+    font-weight: bold;
+}
+QToolButton#machine_status_tooltip:hover {
     background-color: #e6e6e6;
 }</string>
               </property>
@@ -246,21 +278,8 @@ QGroupBox#scanGroup::title {
           <string>Quadrupole scan settings</string>
          </property>
          <layout class="QGridLayout" name="gridScan">
-          <item row="3" column="1">
-           <widget class="QSpinBox" name="meas_per_step">
-            <property name="minimum">
-             <number>2</number>
-            </property>
-            <property name="maximum">
-             <number>200</number>
-            </property>
-            <property name="value">
-             <number>10</number>
-            </property>
-           </widget>
-          </item>
-          <item row="0" column="1">
-           <widget class="QDoubleSpinBox" name="delta_min_scan">
+          <item row="0" column="2">
+           <widget class="QDoubleSpinBox" name="maximum_current">
             <property name="decimals">
              <number>4</number>
             </property>
@@ -268,10 +287,26 @@ QGroupBox#scanGroup::title {
              <double>-10.000000000000000</double>
             </property>
             <property name="maximum">
-             <double>10.000000000000000</double>
+             <double>10000.000000000000000</double>
             </property>
             <property name="value">
-             <double>-0.300000000000000</double>
+             <double>150.000000000000000</double>
+            </property>
+           </widget>
+          </item>
+          <item row="0" column="1">
+           <widget class="QDoubleSpinBox" name="minimum_current">
+            <property name="decimals">
+             <number>4</number>
+            </property>
+            <property name="minimum">
+             <double>-10000.000000000000000</double>
+            </property>
+            <property name="maximum">
+             <double>10000.000000000000000</double>
+            </property>
+            <property name="value">
+             <double>0.000000000000000</double>
             </property>
            </widget>
           </item>
@@ -280,7 +315,7 @@ QGroupBox#scanGroup::title {
             <item>
              <widget class="QLabel" name="label">
               <property name="text">
-               <string>Delta min</string>
+               <string>Current [A] range</string>
               </property>
              </widget>
             </item>
@@ -302,7 +337,7 @@ QGroupBox#scanGroup::title {
                <cursorShape>PointingHandCursor</cursorShape>
               </property>
               <property name="toolTip">
-               <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Relative, dimensionless quadrupole strength change: ΔK1/K1₀.&lt;/p&gt;&lt;p&gt;The scanned strength is computed as:&lt;/p&gt;&lt;p&gt;K1 = K1₀ · (1 + Δ)&lt;/p&gt;&lt;p&gt;K1 has a unit of 1/m².&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+               <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Range of quadrupole current for a quadrupole scan. &lt;/p&gt;&lt;p&gt;The tool picks uniformly number of steps between minimum and maximum current.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
               </property>
               <property name="styleSheet">
                <string notr="true">QToolButton#delta_min_info_button {
@@ -332,93 +367,7 @@ QToolButton#delta_min_info_button:hover {
             </item>
            </layout>
           </item>
-          <item row="1" column="1">
-           <widget class="QDoubleSpinBox" name="delta_max_scan">
-            <property name="decimals">
-             <number>4</number>
-            </property>
-            <property name="minimum">
-             <double>-10.000000000000000</double>
-            </property>
-            <property name="maximum">
-             <double>10.000000000000000</double>
-            </property>
-            <property name="value">
-             <double>0.300000000000000</double>
-            </property>
-           </widget>
-          </item>
           <item row="1" column="0">
-           <layout class="QHBoxLayout" name="deltaMaxLabelHBox">
-            <item>
-             <widget class="QLabel" name="labelDeltaMax">
-              <property name="text">
-               <string>Delta max</string>
-              </property>
-             </widget>
-            </item>
-            <item>
-             <widget class="QToolButton" name="delta_max_info_button">
-              <property name="minimumSize">
-               <size>
-                <width>24</width>
-                <height>24</height>
-               </size>
-              </property>
-              <property name="maximumSize">
-               <size>
-                <width>24</width>
-                <height>24</height>
-               </size>
-              </property>
-              <property name="cursor">
-               <cursorShape>PointingHandCursor</cursorShape>
-              </property>
-              <property name="toolTip">
-               <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Relative, dimensionless quadrupole strength change: ΔK1/K1₀.&lt;/p&gt;&lt;p&gt;The scanned strength is computed as:&lt;/p&gt;&lt;p&gt;K1 = K1₀ · (1 + Δ)&lt;/p&gt;&lt;p&gt;K1 has a unit of 1/m².&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
-              </property>
-              <property name="styleSheet">
-               <string notr="true">QToolButton#delta_max_info_button {
-    border: 1px solid #888;
-    border-radius: 11px;
-    min-width: 22px;
-    max-width: 22px;
-    min-height: 22px;
-    max-height: 22px;
-    padding: 0px;
-    font-weight: bold;
-}
-QToolButton#delta_max_info_button:hover {
-    background-color: #e6e6e6;
-}</string>
-              </property>
-              <property name="text">
-               <string>?</string>
-              </property>
-              <property name="toolButtonStyle">
-               <enum>Qt::ToolButtonTextOnly</enum>
-              </property>
-              <property name="autoRaise">
-               <bool>false</bool>
-              </property>
-             </widget>
-            </item>
-           </layout>
-          </item>
-          <item row="2" column="1">
-           <widget class="QSpinBox" name="steps_settings">
-            <property name="minimum">
-             <number>0</number>
-            </property>
-            <property name="maximum">
-             <number>100</number>
-            </property>
-            <property name="value">
-             <number>5</number>
-            </property>
-           </widget>
-          </item>
-          <item row="2" column="0">
            <layout class="QHBoxLayout" name="horizontalLayout_2">
             <item>
              <widget class="QLabel" name="steps_label">
@@ -430,7 +379,7 @@ QToolButton#delta_max_info_button:hover {
             <item>
              <widget class="QToolButton" name="steps_toolbutton">
               <property name="toolTip">
-               <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Number of quadrupole scan steps between Delta min and Delta max.&lt;br/&gt;Set to 0 to run conventional multi-screen emittance measurement without scanning the quadrupole. &lt;/p&gt;&lt;p&gt;Steps == 0 can also be used to gather data from the screens.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+               <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Number of quadrupole scan steps between the minimum and the maximum current.&lt;br/&gt;Set to 0 to run conventional multi-screen emittance measurement without scanning the quadrupole. &lt;/p&gt;&lt;p&gt;Steps == 0 can also be used to gather data from the screens.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
               </property>
               <property name="styleSheet">
                <string notr="true">QToolButton#steps_toolbutton {
@@ -454,7 +403,7 @@ QToolButton#steps_toolbutton:hover {
             </item>
            </layout>
           </item>
-          <item row="3" column="0">
+          <item row="2" column="0">
            <layout class="QHBoxLayout" name="horizontalLayout_3">
             <item>
              <widget class="QLabel" name="nshots_label">
@@ -490,450 +439,55 @@ QToolButton#nshots_toolbutton:hover {
             </item>
            </layout>
           </item>
-         </layout>
-        </widget>
-       </item>
-       <item>
-        <widget class="QGroupBox" name="boundsSettingsGroup">
-         <property name="styleSheet">
-          <string notr="true">QGroupBox#boundsSettingsGroup {
-    background-color: rgb(245, 245, 245);
-    border: 1px solid rgb(210, 210, 210);
-    border-radius: 6px;
-    margin-top: 8px;
-    padding-top: 6px;
-}
-QGroupBox#boundsSettingsGroup::title {
-    subcontrol-origin: margin;
-    left: 10px;
-    padding: 0 4px 0 4px;
-}</string>
-         </property>
-         <property name="title">
-          <string>Fit search bounds</string>
-         </property>
-         <layout class="QVBoxLayout" name="boundsSettingsVBox">
-          <property name="spacing">
-           <number>8</number>
-          </property>
-          <item>
-           <layout class="QHBoxLayout" name="boundsTitleHBox">
-            <item>
-             <spacer name="boundsTitleSpacer">
-              <property name="orientation">
-               <enum>Qt::Horizontal</enum>
-              </property>
-              <property name="sizeHint" stdset="0">
-               <size>
-                <width>40</width>
-                <height>20</height>
-               </size>
-              </property>
-             </spacer>
-            </item>
-            <item>
-             <widget class="QToolButton" name="bounds_info_button">
-              <property name="toolTip">
-               <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Lower and upper limits allowed for each fitted parameter (normalized emittance ε, Twiss β and α) during the emittance/Twiss fit, set separately for the horizontal and vertical planes.&lt;/p&gt;&lt;p&gt;They restrict the optimizer's search space to physically reasonable solutions and help the fit converge reliably. Pre-filled from the machine defaults, but editable per measurement.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
-              </property>
-              <property name="styleSheet">
-               <string notr="true">QToolButton#bounds_info_button {
-    border: 1px solid #888;
-    border-radius: 11px;
-    min-width: 22px;
-    max-width: 22px;
-    min-height: 22px;
-    max-height: 22px;
-    padding: 0px;
-    font-weight: bold;
-}
-QToolButton#bounds_info_button:hover {
-    background-color: #e6e6e6;
-}</string>
-              </property>
-              <property name="text">
-               <string>?</string>
-              </property>
-             </widget>
-            </item>
-           </layout>
-          </item>
-          <item>
-           <layout class="QHBoxLayout" name="boundsPlanesHBox">
-            <property name="spacing">
-             <number>12</number>
+          <item row="1" column="1">
+           <widget class="QSpinBox" name="steps_settings">
+            <property name="minimum">
+             <number>0</number>
             </property>
-            <item>
-             <widget class="QGroupBox" name="bounds_x_group">
-              <property name="sizePolicy">
-               <sizepolicy hsizetype="Preferred" vsizetype="Maximum">
-                <horstretch>0</horstretch>
-                <verstretch>0</verstretch>
-               </sizepolicy>
-              </property>
-              <property name="title">
-               <string>Horizontal</string>
-              </property>
-              <layout class="QGridLayout" name="boundsXGrid">
-               <property name="horizontalSpacing">
-                <number>10</number>
-               </property>
-               <property name="verticalSpacing">
-                <number>6</number>
-               </property>
-               <item row="0" column="1">
-                <widget class="QLabel" name="label_bounds_x_min">
-                 <property name="text">
-                  <string>Min</string>
-                 </property>
-                 <property name="alignment">
-                  <set>Qt::AlignCenter</set>
-                 </property>
-                </widget>
-               </item>
-               <item row="0" column="2">
-                <widget class="QLabel" name="label_bounds_x_max">
-                 <property name="text">
-                  <string>Max</string>
-                 </property>
-                 <property name="alignment">
-                  <set>Qt::AlignCenter</set>
-                 </property>
-                </widget>
-               </item>
-               <item row="1" column="0">
-                <widget class="QLabel" name="label_bound_emit_x_norm_title">
-                 <property name="font">
-                  <font>
-                   <pointsize>13</pointsize>
-                  </font>
-                 </property>
-                 <property name="text">
-                  <string>ε (norm.)</string>
-                 </property>
-                </widget>
-               </item>
-               <item row="1" column="1">
-                <widget class="QDoubleSpinBox" name="bound_emit_x_norm_min">
-                 <property name="decimals">
-                  <number>5</number>
-                 </property>
-                 <property name="minimum">
-                  <double>-100000.000000000000000</double>
-                 </property>
-                 <property name="maximum">
-                  <double>100000.000000000000000</double>
-                 </property>
-                 <property name="singleStep">
-                  <double>0.001000000000000</double>
-                 </property>
-                </widget>
-               </item>
-               <item row="1" column="2">
-                <widget class="QDoubleSpinBox" name="bound_emit_x_norm_max">
-                 <property name="decimals">
-                  <number>5</number>
-                 </property>
-                 <property name="minimum">
-                  <double>-100000.000000000000000</double>
-                 </property>
-                 <property name="maximum">
-                  <double>100000.000000000000000</double>
-                 </property>
-                 <property name="singleStep">
-                  <double>0.001000000000000</double>
-                 </property>
-                </widget>
-               </item>
-               <item row="2" column="0">
-                <widget class="QLabel" name="label_bound_beta_x0_title">
-                 <property name="font">
-                  <font>
-                   <pointsize>13</pointsize>
-                  </font>
-                 </property>
-                 <property name="text">
-                  <string>β</string>
-                 </property>
-                </widget>
-               </item>
-               <item row="2" column="1">
-                <widget class="QDoubleSpinBox" name="bound_beta_x0_min">
-                 <property name="decimals">
-                  <number>5</number>
-                 </property>
-                 <property name="minimum">
-                  <double>-100000.000000000000000</double>
-                 </property>
-                 <property name="maximum">
-                  <double>100000.000000000000000</double>
-                 </property>
-                 <property name="singleStep">
-                  <double>0.001000000000000</double>
-                 </property>
-                </widget>
-               </item>
-               <item row="2" column="2">
-                <widget class="QDoubleSpinBox" name="bound_beta_x0_max">
-                 <property name="decimals">
-                  <number>5</number>
-                 </property>
-                 <property name="minimum">
-                  <double>-100000.000000000000000</double>
-                 </property>
-                 <property name="maximum">
-                  <double>100000.000000000000000</double>
-                 </property>
-                 <property name="singleStep">
-                  <double>0.001000000000000</double>
-                 </property>
-                </widget>
-               </item>
-               <item row="3" column="0">
-                <widget class="QLabel" name="label_bound_alpha_x0_title">
-                 <property name="font">
-                  <font>
-                   <pointsize>13</pointsize>
-                  </font>
-                 </property>
-                 <property name="text">
-                  <string>α</string>
-                 </property>
-                </widget>
-               </item>
-               <item row="3" column="1">
-                <widget class="QDoubleSpinBox" name="bound_alpha_x0_min">
-                 <property name="decimals">
-                  <number>5</number>
-                 </property>
-                 <property name="minimum">
-                  <double>-100000.000000000000000</double>
-                 </property>
-                 <property name="maximum">
-                  <double>100000.000000000000000</double>
-                 </property>
-                 <property name="singleStep">
-                  <double>0.001000000000000</double>
-                 </property>
-                </widget>
-               </item>
-               <item row="3" column="2">
-                <widget class="QDoubleSpinBox" name="bound_alpha_x0_max">
-                 <property name="decimals">
-                  <number>5</number>
-                 </property>
-                 <property name="minimum">
-                  <double>-100000.000000000000000</double>
-                 </property>
-                 <property name="maximum">
-                  <double>100000.000000000000000</double>
-                 </property>
-                 <property name="singleStep">
-                  <double>0.001000000000000</double>
-                 </property>
-                </widget>
-               </item>
-              </layout>
-             </widget>
-            </item>
-            <item>
-             <widget class="QGroupBox" name="bounds_y_group">
-              <property name="sizePolicy">
-               <sizepolicy hsizetype="Preferred" vsizetype="Maximum">
-                <horstretch>0</horstretch>
-                <verstretch>0</verstretch>
-               </sizepolicy>
-              </property>
-              <property name="title">
-               <string>Vertical</string>
-              </property>
-              <layout class="QGridLayout" name="boundsYGrid">
-               <property name="horizontalSpacing">
-                <number>10</number>
-               </property>
-               <property name="verticalSpacing">
-                <number>6</number>
-               </property>
-               <item row="0" column="1">
-                <widget class="QLabel" name="label_bounds_y_min">
-                 <property name="text">
-                  <string>Min</string>
-                 </property>
-                 <property name="alignment">
-                  <set>Qt::AlignCenter</set>
-                 </property>
-                </widget>
-               </item>
-               <item row="0" column="2">
-                <widget class="QLabel" name="label_bounds_y_max">
-                 <property name="text">
-                  <string>Max</string>
-                 </property>
-                 <property name="alignment">
-                  <set>Qt::AlignCenter</set>
-                 </property>
-                </widget>
-               </item>
-               <item row="1" column="0">
-                <widget class="QLabel" name="label_bound_emit_y_norm_title">
-                 <property name="font">
-                  <font>
-                   <pointsize>13</pointsize>
-                  </font>
-                 </property>
-                 <property name="text">
-                  <string>ε (norm.)</string>
-                 </property>
-                </widget>
-               </item>
-               <item row="1" column="1">
-                <widget class="QDoubleSpinBox" name="bound_emit_y_norm_min">
-                 <property name="decimals">
-                  <number>5</number>
-                 </property>
-                 <property name="minimum">
-                  <double>-100000.000000000000000</double>
-                 </property>
-                 <property name="maximum">
-                  <double>100000.000000000000000</double>
-                 </property>
-                 <property name="singleStep">
-                  <double>0.001000000000000</double>
-                 </property>
-                </widget>
-               </item>
-               <item row="1" column="2">
-                <widget class="QDoubleSpinBox" name="bound_emit_y_norm_max">
-                 <property name="decimals">
-                  <number>5</number>
-                 </property>
-                 <property name="minimum">
-                  <double>-100000.000000000000000</double>
-                 </property>
-                 <property name="maximum">
-                  <double>100000.000000000000000</double>
-                 </property>
-                 <property name="singleStep">
-                  <double>0.001000000000000</double>
-                 </property>
-                </widget>
-               </item>
-               <item row="2" column="0">
-                <widget class="QLabel" name="label_bound_beta_y0_title">
-                 <property name="font">
-                  <font>
-                   <pointsize>13</pointsize>
-                  </font>
-                 </property>
-                 <property name="text">
-                  <string>β</string>
-                 </property>
-                </widget>
-               </item>
-               <item row="2" column="1">
-                <widget class="QDoubleSpinBox" name="bound_beta_y0_min">
-                 <property name="decimals">
-                  <number>5</number>
-                 </property>
-                 <property name="minimum">
-                  <double>-100000.000000000000000</double>
-                 </property>
-                 <property name="maximum">
-                  <double>100000.000000000000000</double>
-                 </property>
-                 <property name="singleStep">
-                  <double>0.001000000000000</double>
-                 </property>
-                </widget>
-               </item>
-               <item row="2" column="2">
-                <widget class="QDoubleSpinBox" name="bound_beta_y0_max">
-                 <property name="decimals">
-                  <number>5</number>
-                 </property>
-                 <property name="minimum">
-                  <double>-100000.000000000000000</double>
-                 </property>
-                 <property name="maximum">
-                  <double>100000.000000000000000</double>
-                 </property>
-                 <property name="singleStep">
-                  <double>0.001000000000000</double>
-                 </property>
-                </widget>
-               </item>
-               <item row="3" column="0">
-                <widget class="QLabel" name="label_bound_alpha_y0_title">
-                 <property name="font">
-                  <font>
-                   <pointsize>13</pointsize>
-                  </font>
-                 </property>
-                 <property name="text">
-                  <string>α</string>
-                 </property>
-                </widget>
-               </item>
-               <item row="3" column="1">
-                <widget class="QDoubleSpinBox" name="bound_alpha_y0_min">
-                 <property name="decimals">
-                  <number>5</number>
-                 </property>
-                 <property name="minimum">
-                  <double>-100000.000000000000000</double>
-                 </property>
-                 <property name="maximum">
-                  <double>100000.000000000000000</double>
-                 </property>
-                 <property name="singleStep">
-                  <double>0.001000000000000</double>
-                 </property>
-                </widget>
-               </item>
-               <item row="3" column="2">
-                <widget class="QDoubleSpinBox" name="bound_alpha_y0_max">
-                 <property name="decimals">
-                  <number>5</number>
-                 </property>
-                 <property name="minimum">
-                  <double>-100000.000000000000000</double>
-                 </property>
-                 <property name="maximum">
-                  <double>100000.000000000000000</double>
-                 </property>
-                 <property name="singleStep">
-                  <double>0.001000000000000</double>
-                 </property>
-                </widget>
-               </item>
-              </layout>
-             </widget>
-            </item>
-           </layout>
+            <property name="maximum">
+             <number>100</number>
+            </property>
+            <property name="value">
+             <number>5</number>
+            </property>
+           </widget>
           </item>
-         </layout>
-        </widget>
-       </item>
-       <item>
-        <widget class="QGroupBox" name="bounds_quad_group">
-         <property name="title"><string>Quadrupole fit parameters</string></property>
-         <layout class="QGridLayout" name="boundsQuadGrid">
-          <property name="horizontalSpacing"><number>10</number></property>
-          <property name="verticalSpacing"><number>6</number></property>
-          <item row="0" column="1"><widget class="QLabel" name="label_bounds_quad_min"><property name="text"><string>Min</string></property><property name="alignment"><set>Qt::AlignCenter</set></property></widget></item>
-          <item row="0" column="2"><widget class="QLabel" name="label_bounds_quad_max"><property name="text"><string>Max</string></property><property name="alignment"><set>Qt::AlignCenter</set></property></widget></item>
-          <item row="1" column="0"><widget class="QLabel" name="label_bound_quad_k1l_0_title"><property name="text"><string>K1L₀ [1/m]</string></property></widget></item>
-          <item row="1" column="1"><widget class="QDoubleSpinBox" name="bound_quad_k1l_0_min"><property name="decimals"><number>5</number></property><property name="minimum"><double>-100000.000000000000000</double></property><property name="maximum"><double>100000.000000000000000</double></property><property name="singleStep"><double>0.001000000000000</double></property></widget></item>
-          <item row="1" column="2"><widget class="QDoubleSpinBox" name="bound_quad_k1l_0_max"><property name="decimals"><number>5</number></property><property name="minimum"><double>-100000.000000000000000</double></property><property name="maximum"><double>100000.000000000000000</double></property><property name="singleStep"><double>0.001000000000000</double></property></widget></item>
-          <item row="2" column="0"><widget class="QLabel" name="label_bound_quad_dx0_title"><property name="text"><string>quad Δx [mm]</string></property></widget></item>
-          <item row="2" column="1"><widget class="QDoubleSpinBox" name="bound_quad_dx0_min"><property name="decimals"><number>5</number></property><property name="minimum"><double>-100000.000000000000000</double></property><property name="maximum"><double>100000.000000000000000</double></property><property name="singleStep"><double>0.001000000000000</double></property><property name="value"><double>-2.000000000000000</double></property></widget></item>
-          <item row="2" column="2"><widget class="QDoubleSpinBox" name="bound_quad_dx0_max"><property name="decimals"><number>5</number></property><property name="minimum"><double>-100000.000000000000000</double></property><property name="maximum"><double>100000.000000000000000</double></property><property name="singleStep"><double>0.001000000000000</double></property><property name="value"><double>2.000000000000000</double></property></widget></item>
-          <item row="3" column="0"><widget class="QLabel" name="label_bound_quad_dy0_title"><property name="text"><string>quad Δy [mm]</string></property></widget></item>
-          <item row="3" column="1"><widget class="QDoubleSpinBox" name="bound_quad_dy0_min"><property name="decimals"><number>5</number></property><property name="minimum"><double>-100000.000000000000000</double></property><property name="maximum"><double>100000.000000000000000</double></property><property name="singleStep"><double>0.001000000000000</double></property><property name="value"><double>-2.000000000000000</double></property></widget></item>
-          <item row="3" column="2"><widget class="QDoubleSpinBox" name="bound_quad_dy0_max"><property name="decimals"><number>5</number></property><property name="minimum"><double>-100000.000000000000000</double></property><property name="maximum"><double>100000.000000000000000</double></property><property name="singleStep"><double>0.001000000000000</double></property><property name="value"><double>2.000000000000000</double></property></widget></item>
-          <item row="4" column="0"><widget class="QLabel" name="label_bound_quad_roll_title"><property name="text"><string>quad roll [mrad]</string></property></widget></item>
-          <item row="4" column="1"><widget class="QDoubleSpinBox" name="bound_quad_roll_min"><property name="decimals"><number>5</number></property><property name="minimum"><double>-100000.000000000000000</double></property><property name="maximum"><double>100000.000000000000000</double></property><property name="singleStep"><double>0.001000000000000</double></property><property name="value"><double>-50.000000000000000</double></property></widget></item>
-          <item row="4" column="2"><widget class="QDoubleSpinBox" name="bound_quad_roll_max"><property name="decimals"><number>5</number></property><property name="minimum"><double>-100000.000000000000000</double></property><property name="maximum"><double>100000.000000000000000</double></property><property name="singleStep"><double>0.001000000000000</double></property><property name="value"><double>50.000000000000000</double></property></widget></item>
+          <item row="3" column="0" colspan="3">
+           <widget class="QPushButton" name="per_screen_ranges_button">
+            <property name="toolTip">
+             <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Set a separate quadrupole current range for each selected screen.&lt;/p&gt;&lt;p&gt;Screens that are not given their own range use the range above.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+            </property>
+            <property name="text">
+             <string>Current range per screen...</string>
+            </property>
+           </widget>
+          </item>
+          <item row="4" column="0" colspan="3">
+           <widget class="QLabel" name="quad_readback_label">
+            <property name="styleSheet">
+             <string notr="true">color: rgb(70, 70, 70);</string>
+            </property>
+            <property name="text">
+             <string>Quadrupole readback: -</string>
+            </property>
+            <property name="wordWrap">
+             <bool>true</bool>
+            </property>
+           </widget>
+          </item>
+          <item row="2" column="1">
+           <widget class="QSpinBox" name="meas_per_step">
+            <property name="minimum">
+             <number>2</number>
+            </property>
+            <property name="maximum">
+             <number>200</number>
+            </property>
+            <property name="value">
+             <number>10</number>
+            </property>
+           </widget>
+          </item>
          </layout>
         </widget>
        </item>
@@ -996,7 +550,7 @@ QGroupBox#localOptimizationSettingsGroup::title {
                <cursorShape>PointingHandCursor</cursorShape>
               </property>
               <property name="toolTip">
-               <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Add the nominal quadrupole strength K1₀ as an extra fit parameter.&lt;/p&gt;&lt;p&gt;Without this option, the optimizer assumes that the measured/read K1 values are exactly correct.&lt;/p&gt;&lt;p&gt;With this option, the optimizer can compensate a mismatch between the readback K1 and the quadrupole strength used by the beam.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+               <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Add the nominal scanned quadrupole setting as an extra fit parameter.&lt;/p&gt;&lt;p&gt;For CLEAR this setting is the magnet current in A.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
               </property>
               <property name="styleSheet">
                <string notr="true">QToolButton#fit_k1_scale_info_button {
@@ -1024,10 +578,6 @@ QToolButton#fit_k1_scale_info_button:hover {
               </property>
              </widget>
             </item>
-           </layout>
-          </item>
-          <item row="1" column="0" colspan="2">
-           <layout class="QHBoxLayout" name="fitMisalignmentHBox">
             <item>
              <widget class="QCheckBox" name="fit_quad_offset_checkbox">
               <property name="toolTip">
@@ -1132,6 +682,275 @@ QToolButton#fit_quad_roll_info_button:hover {
               <property name="text">
                <string>?</string>
               </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QCheckBox" name="fit_energy_checkbox">
+              <property name="text">
+               <string>Fit energy</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QToolButton" name="fit_energy_tooltip">
+              <property name="styleSheet">
+               <string notr="true">QToolButton#fit_energy_tooltip {
+    border: 1px solid #888;
+    border-radius: 11px;
+    min-width: 22px;
+    max-width: 22px;
+    min-height: 22px;
+    max-height: 22px;
+    padding: 0px;
+    font-weight: bold;
+}
+QToolButton#fit_energy_tooltip:hover {
+    background-color: #e6e6e6;
+}</string>
+              </property>
+              <property name="text">
+               <string>?</string>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <widget class="QGroupBox" name="boundsSettingsGroup">
+         <property name="styleSheet">
+          <string notr="true">QGroupBox#boundsSettingsGroup {
+    background-color: rgb(245, 245, 245);
+    border: 1px solid rgb(210, 210, 210);
+    border-radius: 6px;
+    margin-top: 8px;
+    padding-top: 6px;
+}
+QGroupBox#boundsSettingsGroup::title {
+    subcontrol-origin: margin;
+    left: 10px;
+    padding: 0 4px 0 4px;
+}</string>
+         </property>
+         <property name="title">
+          <string>Fit search bounds (click to adjust)</string>
+         </property>
+         <layout class="QVBoxLayout" name="boundsSettingsVBox">
+          <property name="spacing">
+           <number>8</number>
+          </property>
+          <item>
+           <layout class="QHBoxLayout" name="boundsTitleHBox">
+            <item>
+             <spacer name="boundsTitleSpacer">
+              <property name="orientation">
+               <enum>Qt::Horizontal</enum>
+              </property>
+              <property name="sizeHint" stdset="0">
+               <size>
+                <width>40</width>
+                <height>20</height>
+               </size>
+              </property>
+             </spacer>
+            </item>
+            <item>
+             <widget class="QToolButton" name="bounds_info_button">
+              <property name="toolTip">
+               <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Lower and upper limits allowed for each fitted parameter (normalized emittance ε, Twiss β and α) during the emittance/Twiss fit, set separately for the horizontal and vertical planes.&lt;/p&gt;&lt;p&gt;They restrict the optimizer's search space to physically reasonable solutions and help the fit converge reliably. Pre-filled from the machine defaults, but editable per measurement.&lt;/p&gt;&lt;p&gt;Additionally, the tool is able to fit misaligned quadrupoles, roll, and current readback mismatch.&lt;/p&gt;&lt;p&gt;If the method selected doesn't require a scan, this is ignored.&lt;/p&gt;&lt;p&gt;&lt;br/&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+              </property>
+              <property name="styleSheet">
+               <string notr="true">QToolButton#bounds_info_button {
+    border: 1px solid #888;
+    border-radius: 11px;
+    min-width: 22px;
+    max-width: 22px;
+    min-height: 22px;
+    max-height: 22px;
+    padding: 0px;
+    font-weight: bold;
+}
+QToolButton#bounds_info_button:hover {
+    background-color: #e6e6e6;
+}</string>
+              </property>
+              <property name="text">
+               <string>?</string>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </item>
+          <item>
+           <layout class="QHBoxLayout" name="boundsPlanesHBox">
+            <property name="spacing">
+             <number>12</number>
+            </property>
+            <item>
+             <widget class="QGroupBox" name="bounds_x_group">
+              <property name="sizePolicy">
+               <sizepolicy hsizetype="Preferred" vsizetype="Maximum">
+                <horstretch>0</horstretch>
+                <verstretch>0</verstretch>
+               </sizepolicy>
+              </property>
+              <property name="maximumSize">
+               <size>
+                <width>170</width>
+                <height>16777215</height>
+               </size>
+              </property>
+              <property name="title">
+               <string>Horizontal</string>
+              </property>
+              <layout class="QGridLayout" name="boundsXGrid">
+               <property name="horizontalSpacing">
+                <number>10</number>
+               </property>
+               <property name="verticalSpacing">
+                <number>6</number>
+               </property>
+               <item row="0" column="0">
+                <widget class="QPushButton" name="eps_h_bounds">
+                 <property name="text">
+                  <string>ε (norm.)</string>
+                 </property>
+                </widget>
+               </item>
+               <item row="2" column="0">
+                <widget class="QPushButton" name="alpha_h_bounds">
+                 <property name="text">
+                  <string>α</string>
+                 </property>
+                </widget>
+               </item>
+               <item row="1" column="0">
+                <widget class="QPushButton" name="beta_h_bounds">
+                 <property name="text">
+                  <string>β</string>
+                 </property>
+                </widget>
+               </item>
+              </layout>
+             </widget>
+            </item>
+            <item>
+             <widget class="QGroupBox" name="bounds_y_group">
+              <property name="sizePolicy">
+               <sizepolicy hsizetype="Preferred" vsizetype="Maximum">
+                <horstretch>0</horstretch>
+                <verstretch>0</verstretch>
+               </sizepolicy>
+              </property>
+              <property name="maximumSize">
+               <size>
+                <width>170</width>
+                <height>16777215</height>
+               </size>
+              </property>
+              <property name="title">
+               <string>Vertical</string>
+              </property>
+              <layout class="QGridLayout" name="boundsYGrid">
+               <property name="horizontalSpacing">
+                <number>10</number>
+               </property>
+               <property name="verticalSpacing">
+                <number>6</number>
+               </property>
+               <item row="0" column="0">
+                <widget class="QPushButton" name="eps_v_bounds">
+                 <property name="text">
+                  <string>ε (norm.)</string>
+                 </property>
+                </widget>
+               </item>
+               <item row="2" column="0">
+                <widget class="QPushButton" name="alpha_v_bounds">
+                 <property name="text">
+                  <string>α</string>
+                 </property>
+                </widget>
+               </item>
+               <item row="1" column="0">
+                <widget class="QPushButton" name="beta_v_bounds">
+                 <property name="text">
+                  <string>β</string>
+                 </property>
+                </widget>
+               </item>
+              </layout>
+             </widget>
+            </item>
+            <item>
+             <widget class="QGroupBox" name="bounds_quad_group">
+              <property name="maximumSize">
+               <size>
+                <width>200</width>
+                <height>16777215</height>
+               </size>
+              </property>
+              <property name="title">
+               <string>Quadrupole misalignments</string>
+              </property>
+              <layout class="QGridLayout" name="boundsQuadGrid">
+               <property name="horizontalSpacing">
+                <number>10</number>
+               </property>
+               <property name="verticalSpacing">
+                <number>6</number>
+               </property>
+               <item row="1" column="0">
+                <widget class="QPushButton" name="quad_strength_bounds">
+                 <property name="text">
+                  <string>I₀ [A]</string>
+                 </property>
+                </widget>
+               </item>
+               <item row="3" column="0">
+                <widget class="QPushButton" name="quad_dy_bounds">
+                 <property name="text">
+                  <string>quad Δy [mm]</string>
+                 </property>
+                </widget>
+               </item>
+               <item row="2" column="0">
+                <widget class="QPushButton" name="quad_dx_bounds">
+                 <property name="text">
+                  <string>quad Δx [mm]</string>
+                 </property>
+                </widget>
+               </item>
+               <item row="4" column="0">
+                <widget class="QPushButton" name="quad_roll_bounds">
+                 <property name="text">
+                  <string>quad roll [mrad]</string>
+                 </property>
+                </widget>
+               </item>
+              </layout>
+             </widget>
+            </item>
+            <item>
+             <widget class="QGroupBox" name="groupBox">
+              <property name="title">
+               <string>Beam settings</string>
+              </property>
+              <widget class="QPushButton" name="energy_pref_bounds">
+               <property name="geometry">
+                <rect>
+                 <x>10</x>
+                 <y>40</y>
+                 <width>125</width>
+                 <height>32</height>
+                </rect>
+               </property>
+               <property name="text">
+                <string>Energy [MeV/c]</string>
+               </property>
+              </widget>
              </widget>
             </item>
            </layout>
@@ -1697,7 +1516,43 @@ QGroupBox#fit_results_group::title {
                   </layout>
                  </widget>
                 </item>
+                <item>
+                 <widget class="QGroupBox" name="groupBox_2">
+                  <property name="title">
+                   <string>Beam settings</string>
+                  </property>
+                  <layout class="QGridLayout" name="fitResultsBeamGrid">
+                   <property name="horizontalSpacing">
+                    <number>10</number>
+                   </property>
+                   <item row="0" column="0">
+                    <widget class="QLabel" name="energy_result_label">
+                     <property name="text">
+                      <string>Energy</string>
+                     </property>
+                    </widget>
+                   </item>
+                   <item row="0" column="1">
+                    <widget class="QLabel" name="result_energy_pref">
+                     <property name="text">
+                      <string>-</string>
+                     </property>
+                    </widget>
+                   </item>
+                  </layout>
+                 </widget>
+                </item>
                </layout>
+              </widget>
+             </item>
+             <item>
+              <widget class="QPushButton" name="delete_point_button">
+               <property name="toolTip">
+                <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Choose scan points to exclude from the emittance fit, for example a step where the camera returned a bad image.&lt;/p&gt;&lt;p&gt;The measured data is kept, the excluded points are only skipped by the optimization and hidden from the plot.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+               </property>
+               <property name="text">
+                <string>Delete chosen point</string>
+               </property>
               </widget>
              </item>
              <item>
