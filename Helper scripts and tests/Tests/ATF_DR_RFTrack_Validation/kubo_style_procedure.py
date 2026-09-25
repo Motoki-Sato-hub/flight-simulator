@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+import hashlib
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -26,6 +27,10 @@ from Interfaces.ATF2.DR_ATF2.ATF_DR_RFTrack_lattice import (
     get_lattice_metadata,
     set_quadrupole_roll_error,
     set_sextupole_roll_error,
+)
+from Interfaces.ATF2.DR_ATF2.ATF_DR_RFTrack_state import (
+    apply_known_machine_state,
+    read_known_machine_state,
 )
 
 
@@ -59,11 +64,31 @@ if MAGNET_ROLL_MULTIPLIER < 0.0:
     raise ValueError("ATF_DR_KUBO_MAGNET_ROLL_MULTIPLIER must be non-negative")
 SIGMA_BPM_OFFSET_MM = 0.3
 SIGMA_BPM_ROLL_RAD = 20e-3
+# In the magnet-error scan, BPM imperfections remain at Kubo Table-I strength
+# (300 um offset and 20 mrad roll), independently of the magnet-error scale.
+# An explicit environment override is available for a dedicated BPM scan.
+BPM_ERROR_SCALE = float(
+    os.environ.get("ATF_DR_KUBO_BPM_ERROR_SCALE", "1.0")
+)
+if not 0.0 < BPM_ERROR_SCALE <= 1.0:
+    raise ValueError("ATF_DR_KUBO_BPM_ERROR_SCALE must be in (0, 1]")
 DELTA = 3.5e-3
 # Match the 0.01-mrad 2011-lattice linear probe used for the nominal map.
 PROBE = 1e-5
-KUBO_GAIN_FIRST = 0.7
-DISPERSION_WEIGHT = 0.05
+# Kubo uses 0.7 of the proposed correction in the first of two iterations.
+# Keep it configurable only for an explicitly labelled simulation study; the
+# default is the published value.
+KUBO_GAIN_FIRST = float(os.environ.get("ATF_DR_KUBO_FIRST_GAIN", "0.7"))
+if not 0.0 < KUBO_GAIN_FIRST <= 1.0:
+    raise ValueError("ATF_DR_KUBO_FIRST_GAIN must be in (0, 1]")
+# Kubo's standard factor r=0.05 weights vertical-dispersion residuals against
+# vertical COD in Eq. (16).  It is exposed for an emittance-guided parameter
+# scan, while the default exactly retains the paper value.
+DISPERSION_WEIGHT = float(
+    os.environ.get("ATF_DR_KUBO_DISPERSION_WEIGHT", "0.05")
+)
+if DISPERSION_WEIGHT <= 0.0:
+    raise ValueError("ATF_DR_KUBO_DISPERSION_WEIGHT must be positive")
 # The full inverse retains numerical modes that demand multi-mrad kicks for a
 # sub-mm BPM-offset residual.  Kubo specifies SVD response inversion but not a
 # published singular-value cutoff; retain a well-conditioned subset and report
@@ -81,13 +106,29 @@ COD_DISPERSION_SOLVER = os.environ.get(
 )
 if COD_DISPERSION_SOLVER not in {"sad_greedy", "svd"}:
     raise ValueError("ATF_DR_KUBO_COD_DISPERSION_SOLVER must be sad_greedy or svd")
-# ``nominal`` is the Kubo/digital-twin baseline.  ``local_orm`` is a
-# diagnostic upper bound: it measures the virtual-machine ORM by the same
-# finite corrector changes used on a real machine.  It is intentionally never
-# confused with the nominal-model result.
+# ``nominal`` is the Kubo/digital-twin baseline.  ``state_model`` follows the
+# operational SAD pattern: controls-visible strengths and corrector settings
+# are loaded into the model before its finite-difference response is built.
+# ``local_orm`` is a diagnostic upper bound: it measures the virtual-machine
+# ORM by the same finite corrector changes used on a real machine.  It is
+# intentionally never confused with either model-side response.
 RESPONSE_SOURCE = os.environ.get("ATF_DR_KUBO_RESPONSE_SOURCE", "nominal")
-if RESPONSE_SOURCE not in {"nominal", "local_orm"}:
-    raise ValueError("ATF_DR_KUBO_RESPONSE_SOURCE must be nominal or local_orm")
+if RESPONSE_SOURCE not in {"nominal", "state_model", "local_orm"}:
+    raise ValueError(
+        "ATF_DR_KUBO_RESPONSE_SOURCE must be nominal, state_model, or local_orm"
+    )
+_known_state_value = os.environ.get("ATF_DR_KUBO_MACHINE_STATE", "")
+KNOWN_MACHINE_STATE_PATH = Path(_known_state_value) if _known_state_value else None
+if RESPONSE_SOURCE == "state_model" and KNOWN_MACHINE_STATE_PATH is None:
+    raise ValueError(
+        "state_model response requires ATF_DR_KUBO_MACHINE_STATE=<snapshot.json>"
+    )
+if KNOWN_MACHINE_STATE_PATH is not None and not KNOWN_MACHINE_STATE_PATH.is_file():
+    raise FileNotFoundError(f"Machine-state snapshot not found: {KNOWN_MACHINE_STATE_PATH}")
+KNOWN_MACHINE_STATE_SHA256 = (
+    hashlib.sha256(KNOWN_MACHINE_STATE_PATH.read_bytes()).hexdigest()
+    if KNOWN_MACHINE_STATE_PATH is not None else ""
+)
 LOCAL_ORM_DIAGNOSTIC_ONLY = os.environ.get(
     "ATF_DR_KUBO_LOCAL_ORM_DIAGNOSTIC_ONLY", "0"
 ) == "1"
@@ -115,10 +156,12 @@ ALIGNMENT_MAP_PATH = (
     DEFAULT_ALIGNMENT_MAP if _alignment_map_value == "default"
     else Path(_alignment_map_value) if _alignment_map_value else None
 )
-# Kubo used 0.1 mrad.  The 2011 reference lattice loses the horizontal
-# periodic orbit at that amplitude because its sextupoles/working point differ
-# from the 2003 lattice.  0.01 mrad remains in the linear response regime and
-# is the largest symmetric finite-difference probe with a periodic orbit.
+# Kubo used 0.1 mrad.  For the 2011 reference lattice, the current closed-
+# orbit solver cannot continue the nearby horizontal periodic-orbit branch at
+# that amplitude (already for ZH1R); sextupole feed-down/nonlinear optics are
+# the likely cause.  This does not prove that no more distant fixed point
+# exists.  0.01 mrad remains in the local linear-response regime and is the
+# largest symmetric finite-difference probe for which both branches converge.
 # The response is divided by this kick, so it retains Kubo's unit-kick map.
 STEERER_RESPONSE_KICK_RAD = float(
     os.environ.get("ATF_DR_KUBO_RESPONSE_KICK_RAD", "1e-5")
@@ -133,7 +176,7 @@ LOCAL_ORM_PROBE_RAD = float(
 )
 if LOCAL_ORM_PROBE_RAD <= 0.0:
     raise ValueError("ATF_DR_KUBO_LOCAL_ORM_PROBE_RAD must be positive")
-RESPONSE_CACHE_VERSION = 8
+RESPONSE_CACHE_VERSION = 9
 # SAD's skew-correction configuration selects this pair; it also satisfies the
 # phase-separation criterion stated in Kubo (2003), Sec. IV E.
 PROBES = ("ZH28R", "ZH30R")
@@ -155,7 +198,26 @@ PRELIMINARY_CONTINUATION_Y_MM = float(
 )
 if PRELIMINARY_CONTINUATION_X_MM <= 0 or PRELIMINARY_CONTINUATION_Y_MM <= 0:
     raise ValueError("Kubo continuation limits must be positive")
-PRELIMINARY_MAX_FEEDBACK_STEPS = 20
+PRELIMINARY_MAX_FEEDBACK_STEPS = int(
+    os.environ.get("ATF_DR_KUBO_RAMP_MAX_FEEDBACK_STEPS", "20")
+)
+if PRELIMINARY_MAX_FEEDBACK_STEPS < 0:
+    raise ValueError("ATF_DR_KUBO_RAMP_MAX_FEEDBACK_STEPS must be non-negative")
+# These govern only numerical homotopy between the ideal and requested-error
+# lattice.  They do not scale Table-I errors.  The conservative defaults are
+# retained for full-strength studies; a small-error ensemble can explicitly
+# use larger steps to avoid spending most of its runtime on an unnecessary
+# continuation.
+PRELIMINARY_INITIAL_INCREMENT = float(
+    os.environ.get("ATF_DR_KUBO_RAMP_INITIAL_INCREMENT", "0.05")
+)
+PRELIMINARY_MAX_INCREMENT = float(
+    os.environ.get("ATF_DR_KUBO_RAMP_MAX_INCREMENT", "0.10")
+)
+if not 0.0 < PRELIMINARY_INITIAL_INCREMENT <= PRELIMINARY_MAX_INCREMENT <= 1.0:
+    raise ValueError(
+        "Kubo ramp increments must satisfy 0 < initial <= maximum <= 1"
+    )
 ROUGH_RESPONSE_KICK_RAD = 1e-6
 # RF-Track coordinates are mm/mrad.  The default corresponds to 0.1 nm or
 # 0.1 nrad.  A larger value is only an explicit numerical-solver study; it is
@@ -451,13 +513,15 @@ def _preliminary_orbit_search(response):
     """
     rng = np.random.default_rng(SEED + 1)
     n_bpms = len(_paper_bpm_names(ATFDRRingCorrection(_build_lattice())))
-    offsets = rng.normal(0.0, SIGMA_BPM_OFFSET_MM, (n_bpms, 2))
-    rolls = rng.normal(0.0, SIGMA_BPM_ROLL_RAD, n_bpms)
+    offsets = rng.normal(
+        0.0, SIGMA_BPM_OFFSET_MM * BPM_ERROR_SCALE, (n_bpms, 2)
+    )
+    rolls = rng.normal(0.0, SIGMA_BPM_ROLL_RAD * BPM_ERROR_SCALE, n_bpms)
     x_commands = np.zeros(len(response["x_names"]))
     y_commands = np.zeros(len(response["y_names"]))
     guess = np.zeros(4)
     fraction = 0.0
-    increment = 0.05
+    increment = PRELIMINARY_INITIAL_INCREMENT
     records = []
     counts = None
 
@@ -546,7 +610,7 @@ def _preliminary_orbit_search(response):
             flush=True,
         )
         fraction = trial_fraction
-        increment = min(0.10, increment * 1.35)
+        increment = min(PRELIMINARY_MAX_INCREMENT, increment * 1.35)
 
     # Kubo's rough-COD stage uses SAD's free-parameter search on the *error
     # lattice*, not the nominal response matrix used by the following stages.
@@ -717,13 +781,16 @@ def _coupling(machine, guess, offsets, rolls):
 
 
 def _load_or_build_responses(cache):
-    """Kubo computes one error-free response set shared by all seeds."""
+    """Build the requested model-side response set once for this run state."""
     if cache.exists():
         data = np.load(cache, allow_pickle=True)
         if (
             int(data.get("cache_version", -1)) == RESPONSE_CACHE_VERSION
             and str(data.get("skew_family", "")) == SKEW_FAMILY
             and str(data.get("lattice_source_sha256", "")) == LATTICE_SOURCE_SHA256
+            and str(data.get("response_source", "")) == RESPONSE_SOURCE
+            and str(data.get("known_machine_state_sha256", ""))
+            == KNOWN_MACHINE_STATE_SHA256
         ):
             return {
                 "x_names": tuple(data["x_names"].tolist()),
@@ -739,7 +806,16 @@ def _load_or_build_responses(cache):
     # the correction API is deliberately in rad.  A response made before that
     # boundary conversion has a factor-of-1000 actuator error and is invalid.
 
-    model = ATFDRRingCorrection(_build_lattice())
+    response_lattice = _build_lattice()
+    if RESPONSE_SOURCE == "state_model":
+        # Equivalent in role to SAD's SetRingQuad/SetRingSext/steerer import:
+        # only controls-visible values enter this model.  In particular, a
+        # hidden survey/alignment error is not copied from the simulated
+        # machine and therefore remains a genuine model mismatch.
+        apply_known_machine_state(
+            response_lattice, read_known_machine_state(KNOWN_MACHINE_STATE_PATH)
+        )
+    model = ATFDRRingCorrection(response_lattice)
     bpm_names = _paper_bpm_names(model)
     x_names = _paper_corrector_names(model, "x")
     y_names = _paper_corrector_names(model, "y")
@@ -775,6 +851,8 @@ def _load_or_build_responses(cache):
         skew_names=np.asarray(skew_names), coupling=coupling.matrix,
         skew_family=np.asarray(SKEW_FAMILY),
         lattice_source_sha256=np.asarray(LATTICE_SOURCE_SHA256),
+        response_source=np.asarray(RESPONSE_SOURCE),
+        known_machine_state_sha256=np.asarray(KNOWN_MACHINE_STATE_SHA256),
     )
     return {
         "x_names": x_names, "x": x.matrix, "y_names": y_names,
@@ -919,6 +997,12 @@ def run_case(response):
     stages = {}
     actuator_settings = {}
 
+    # Kubo's preliminary orbit search is retained before this point.  Record
+    # its output explicitly: it is the physically relevant ``before`` state
+    # for the three correction stages below, not the untracked error draw.
+    guess, stages["before_cod"] = _stage_metrics(machine, guess, offsets, rolls)
+    actuator_settings["before_cod"] = _actuator_snapshot(machine, response)
+
     print("Kubo C: COD", flush=True)
     # Kubo C: all steerers, 0.7 of calculated correction then full correction.
     cod_selected_counts = []
@@ -986,8 +1070,9 @@ def run_case(response):
                 * MAGNET_ROLL_MULTIPLIER * 1e6
             ),
             "magnet_roll_multiplier": MAGNET_ROLL_MULTIPLIER,
-            "bpm_offset_um": SIGMA_BPM_OFFSET_MM * 1e3,
-            "bpm_roll_mrad": SIGMA_BPM_ROLL_RAD * 1e3,
+            "bpm_offset_um": SIGMA_BPM_OFFSET_MM * BPM_ERROR_SCALE * 1e3,
+            "bpm_roll_mrad": SIGMA_BPM_ROLL_RAD * BPM_ERROR_SCALE * 1e3,
+            "bpm_error_scale": BPM_ERROR_SCALE,
         },
         "components_with_magnet_errors": counts,
         "published_alignment": {
@@ -1004,6 +1089,9 @@ def run_case(response):
                 "x": PRELIMINARY_CONTINUATION_X_MM,
                 "y": PRELIMINARY_CONTINUATION_Y_MM,
             },
+            "ramp_initial_increment": PRELIMINARY_INITIAL_INCREMENT,
+            "ramp_max_increment": PRELIMINARY_MAX_INCREMENT,
+            "ramp_max_feedback_steps": PRELIMINARY_MAX_FEEDBACK_STEPS,
             "continuation_note": (
                 "Tighter than the published final acceptance limits; used only "
                 "to retain the nearby periodic-orbit branch while ramping the "
@@ -1021,6 +1109,7 @@ def run_case(response):
             "cod_selected_counts": cod_selected_counts,
             "dispersion_selected_counts": dispersion_selected_counts,
             "dispersion_requested_gains": [KUBO_GAIN_FIRST, 1.0],
+            "dispersion_weight_r": DISPERSION_WEIGHT,
             "dispersion_applied_gains": dispersion_applied_gains,
             "dispersion_line_search": "same nominal response; backtracking on periodic orbit and stacked COD/Dy residual",
             "source": "sad/operation/lib/cod.n and coddispersion.n",
@@ -1033,6 +1122,18 @@ def run_case(response):
         "skew_corrector_family": SKEW_FAMILY,
         "response_settings": {
             "source": RESPONSE_SOURCE,
+            "known_machine_state_path": (
+                str(KNOWN_MACHINE_STATE_PATH)
+                if RESPONSE_SOURCE == "state_model" else None
+            ),
+            "known_machine_state_sha256": (
+                KNOWN_MACHINE_STATE_SHA256 if RESPONSE_SOURCE == "state_model" else None
+            ),
+            "known_machine_state_scope": (
+                "normal strengths, corrector kicks, and skew settings; "
+                "alignment errors excluded"
+                if RESPONSE_SOURCE == "state_model" else None
+            ),
             "steerer_response_kick_mrad": STEERER_RESPONSE_KICK_RAD * 1e3,
             "local_orm_probe_mrad": (
                 LOCAL_ORM_PROBE_RAD * 1e3
@@ -1047,6 +1148,8 @@ def run_case(response):
             ),
             "cod_svd_rcond": RCOND_COD,
             "coupling_svd_rcond": RCOND_COUPLING,
+            "first_correction_gain": KUBO_GAIN_FIRST,
+            "dispersion_weight_r": DISPERSION_WEIGHT,
             "closed_orbit_tolerance_mm_mrad": CLOSED_ORBIT_TOLERANCE,
             "x_cod_svd_rank": _svd_rank(response["x"], RCOND_COD),
             "y_cod_svd_rank": _svd_rank(response["y_orbit"], RCOND_COD),
@@ -1070,7 +1173,7 @@ def main():
     probe_label = f"{STEERER_RESPONSE_KICK_RAD * 1e3:g}".replace(".", "p")
     rcond_label = f"{RCOND_COD:.0e}".replace("-", "m")
     cache = analysis / (
-        f"kubo2003_nominal_kick_response_cache_{LATTICE_LABEL}_"
+        f"kubo2003_{RESPONSE_SOURCE}_kick_response_cache_{LATTICE_LABEL}_"
         f"{SKEW_FAMILY}_probe_{probe_label}mrad.npz"
     )
     response = _load_or_build_responses(cache)
@@ -1083,6 +1186,21 @@ def main():
     ) + (
         "" if MAGNET_ERROR_SCALE == 1.0
         else f"_scale_{MAGNET_ERROR_SCALE:g}".replace(".", "p")
+    ) + (
+        "" if np.isclose(KUBO_GAIN_FIRST, 0.7)
+        else f"_firstgain_{KUBO_GAIN_FIRST:g}".replace(".", "p")
+    ) + (
+        "" if np.isclose(DISPERSION_WEIGHT, 0.05)
+        else f"_dyweight_{DISPERSION_WEIGHT:g}".replace(".", "p")
+    ) + (
+        "" if (
+            np.isclose(PRELIMINARY_INITIAL_INCREMENT, 0.05)
+            and np.isclose(PRELIMINARY_MAX_INCREMENT, 0.10)
+            and PRELIMINARY_MAX_FEEDBACK_STEPS == 20
+        ) else (
+            f"_ramp_{PRELIMINARY_INITIAL_INCREMENT:g}_{PRELIMINARY_MAX_INCREMENT:g}_"
+            f"steps_{PRELIMINARY_MAX_FEEDBACK_STEPS}"
+        ).replace(".", "p")
     )
     result_path = analysis / f"kubo2003_rftrack_procedure_result{suffix}.json"
     result_path.write_text(

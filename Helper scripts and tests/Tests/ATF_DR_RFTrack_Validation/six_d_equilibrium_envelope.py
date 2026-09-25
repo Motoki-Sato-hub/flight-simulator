@@ -115,7 +115,10 @@ def main():
     ).coordinates
 
     emittance = {}
-    for stage in ("after_cod", "after_cod_dispersion", "after_coupling"):
+    stages = (
+        "before_cod", "after_cod", "after_cod_dispersion", "after_coupling"
+    )
+    for stage in stages:
         try:
             result = _equilibrium_for_stage(
                 procedure,
@@ -170,10 +173,20 @@ def main():
             "paper_nominal_response_probe_mrad": 0.1,
             "cod_svd_rcond": procedure.RCOND_COD,
             "coupling_svd_rcond": procedure.RCOND_COUPLING,
+            "first_correction_gain": procedure.KUBO_GAIN_FIRST,
+            "dispersion_weight_r": procedure.DISPERSION_WEIGHT,
             "cod_dispersion_solver": procedure.COD_DISPERSION_SOLVER,
             "envelope_model": ENVELOPE_MODEL,
             "lattice_data_path": procedure.LATTICE_DATA_PATH or "default",
             "skew_corrector_family": procedure.SKEW_FAMILY,
+            "ramp_initial_increment": procedure.PRELIMINARY_INITIAL_INCREMENT,
+            "ramp_max_increment": procedure.PRELIMINARY_MAX_INCREMENT,
+            "ramp_max_feedback_steps": procedure.PRELIMINARY_MAX_FEEDBACK_STEPS,
+            "bpm_error_scale": procedure.BPM_ERROR_SCALE,
+            "bpm_offset_um": procedure.SIGMA_BPM_OFFSET_MM
+            * procedure.BPM_ERROR_SCALE * 1e3,
+            "bpm_roll_mrad": procedure.SIGMA_BPM_ROLL_RAD
+            * procedure.BPM_ERROR_SCALE * 1e3,
         },
     }
     # These SVD cutoffs materially change the correction command.  Include
@@ -184,16 +197,29 @@ def main():
         f"{procedure.RCOND_COUPLING:g}".replace(".", "p").replace("-", "m")
     )
     suffix = (
-        f"{procedure.LATTICE_LABEL}_{procedure.SKEW_FAMILY}_"
+        f"v2_{procedure.LATTICE_LABEL}_{procedure.SKEW_FAMILY}_"
         f"{ENVELOPE_MODEL}_seed_{procedure.SEED}_scale_{procedure.MAGNET_ERROR_SCALE:g}_"
         f"solver_{procedure.COD_DISPERSION_SOLVER}_codrcond_{cod_label}_"
-        f"couplingrcond_{coupling_label}"
+        f"couplingrcond_{coupling_label}_qparticles_{QUANTUM_PARTICLES}"
     ).replace(".", "p")
+    if not np.isclose(procedure.KUBO_GAIN_FIRST, 0.7):
+        suffix += f"_firstgain_{procedure.KUBO_GAIN_FIRST:g}".replace(".", "p")
+    if not np.isclose(procedure.DISPERSION_WEIGHT, 0.05):
+        suffix += f"_dyweight_{procedure.DISPERSION_WEIGHT:g}".replace(".", "p")
+    if not (
+        np.isclose(procedure.PRELIMINARY_INITIAL_INCREMENT, 0.05)
+        and np.isclose(procedure.PRELIMINARY_MAX_INCREMENT, 0.10)
+        and procedure.PRELIMINARY_MAX_FEEDBACK_STEPS == 20
+    ):
+        suffix += (
+            f"_ramp_{procedure.PRELIMINARY_INITIAL_INCREMENT:g}_"
+            f"{procedure.PRELIMINARY_MAX_INCREMENT:g}_"
+            f"steps_{procedure.PRELIMINARY_MAX_FEEDBACK_STEPS}"
+        ).replace(".", "p")
     result_path = analysis / f"kubo2003_rftrack_emittance_envelope_{suffix}.json"
     result_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
-    labels = ("COD", "COD + Dy", "coupling")
-    stages = ("after_cod", "after_cod_dispersion", "after_coupling")
+    labels = ("before COD", "COD", "COD + Dy", "coupling")
     vertical = [emittance[stage].get("vertical_like_eigen_pm_rad", np.nan) for stage in stages]
     projected = [emittance[stage].get("projected_y_pm_rad", np.nan) for stage in stages]
     dy = [correction["stages"][stage]["true_dy_all_bpm_mm"] for stage in stages]
@@ -201,7 +227,15 @@ def main():
     figure, axes = plt.subplots(1, 3, figsize=(11.5, 3.4), constrained_layout=True)
     axes[0].plot(labels, vertical, "o-", label="vertical-like eigen")
     axes[0].plot(labels, projected, "s--", label="projected y")
-    axes[0].set(title="radiation equilibrium (failed stages omitted)", ylabel="emittance [pm rad]")
+    paper_labels = labels[1:]
+    paper_values = [
+        payload["paper_table_ii_vertical_emittance_pm_rad"][stage]
+        for stage in stages[1:]
+    ]
+    axes[0].plot(
+        paper_labels, paper_values, "k^:", label="Kubo Table II (reference)"
+    )
+    axes[0].set(title="radiation equilibrium", ylabel="emittance [pm rad]")
     axes[0].grid(alpha=0.3)
     axes[0].legend(fontsize=8)
     axes[1].plot(labels, dy, "o-", color="tab:blue")
@@ -211,7 +245,7 @@ def main():
     axes[2].set(title="measured coupling", ylabel="Cxy")
     axes[2].grid(alpha=0.3)
     figure.suptitle(
-        f"RF-Track Kubo sequence + {ENVELOPE_MODEL} envelope "
+        f"RF-Track Kubo sequence + {ENVELOPE_MODEL.replace('_', ' ')} envelope "
         f"({procedure.MAGNET_ERROR_SCALE:g} Table-I magnet errors)"
     )
     figure_path = analysis / f"kubo2003_rftrack_emittance_envelope_{suffix}.png"

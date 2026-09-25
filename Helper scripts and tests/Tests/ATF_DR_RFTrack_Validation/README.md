@@ -47,6 +47,47 @@ equilibrium emittance の評価には用いません。equilibrium は上式の 
    PYTHONPATH=. ATF_DR_CURRENT_ENSEMBLE_SEEDS=2003,2004,2005,2006,2007 /home/motokisato/rftrack-env/bin/python "Helper scripts and tests/Tests/ATF_DR_RFTrack_Validation/current_daihon_ensemble.py"
    ```
 
+5. RFTrack/SAD 単位境界の監査
+
+   ```bash
+   PYTHONPATH=. /home/motokisato/rftrack-env/bin/python "Helper scripts and tests/Tests/ATF_DR_RFTrack_Validation/unit_convention_audit.py"
+   ```
+
+   30 µm alignment の m→mm 変換、public API の rad→RFTrack mrad
+   corrector 境界、ならびに小さな probe 幅に対する ORM の安定性を確認します。
+
+6. rough-COD preparation の seed 診断
+
+   ```bash
+   PYTHONPATH=. /home/motokisato/rftrack-env/bin/python "Helper scripts and tests/Tests/ATF_DR_RFTrack_Validation/preliminary_orbit_seed_scan.py" --seeds 2000:2009 --continuation-x-mm 0.5 --continuation-y-mm 0.5
+   ```
+
+   これは final correction/emittance の統計ではありません。Table-I error を入れる途中で
+   periodic orbit を維持できるかを記録し、Kubo 論文の rough-COD 条件
+   (2 mm, 1 mm) と RFTrack の branch-continuation 条件を分離して調べるための診断です。
+
+7. simulation truth を用いる emittance-guided scan
+
+   ```bash
+   PYTHONPATH=. /home/motokisato/rftrack-env/bin/python "Helper scripts and tests/Tests/ATF_DR_RFTrack_Validation/emittance_guided_parameter_scan.py" --seeds 2003,2004 --dispersion-weights 0.02,0.05,0.1 --first-gains 0.5,0.7,1.0 --quantum-particles 32
+   ```
+
+   これは BPM だけで emittance を測る実機 algorithm ではありません。simulation だけで
+   使える 6D equilibrium の vertical-like emittance を offline objective とし、Kubo の
+   dispersion weight \(r\) と first gain を比較する研究用 scan です。screening には
+   `--quantum-particles 10` を使えますが、候補の結論はより大きい同一 particle 数・複数 seed
+   で再評価します。結果 filename には particle 数も含まれます。
+
+8. error-strength scan
+
+   ```bash
+   PYTHONPATH=. /home/motokisato/rftrack-env/bin/python "Helper scripts and tests/Tests/ATF_DR_RFTrack_Validation/error_strength_scan.py" --scales 0.1,0.2,0.3,0.5,0.7,1.0 --seed 2003 --quantum-particles 32
+   ```
+
+   各 error strength で、correction sequence、各 stage の radiation envelope、
+   vertical-like emittance を別々に記録します。単一 seed の上限探索は screening であり、
+   usable range の結論には複数 seed が必要です。
+
 ## Full-strength response diagnostic
 
 Table-I 100% error の現行 daihon では、`response_source=nominal` が Kubo 型の
@@ -81,6 +122,10 @@ diagnostic-only mode は correction を適用せず、この差だけを JSON �
 | `kubo_style_procedure.py` | rough COD → COD → COD+Dy → coupling の一連の correction |
 | `six_d_equilibrium_envelope.py` | 各 correction stage の radiation-equilibrium emittance |
 | `current_daihon_ensemble.py` | 現行 daihon の seed 統計（observable） |
+| `unit_convention_audit.py` | m/mm、rad/mrad、有限差分 ORM の単位監査 |
+| `preliminary_orbit_seed_scan.py` | rough-COD / periodic-orbit preparation の seed 依存性 |
+| `emittance_guided_parameter_scan.py` | 6D equilibrium emittance による offline parameter study |
+| `error_strength_scan.py` | Table-I error strength に対する correction / envelope の段階的検証 |
 | `utilities/` | SAD export と Kubo 図 digitization の補助検証 |
 | `exploratory/` | 開発時の比較・感度 study。主結果には使わない |
 

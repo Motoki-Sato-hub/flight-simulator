@@ -19,6 +19,10 @@ from Interfaces.ATF2.DR_ATF2.ATF_DR_RFTrack_lattice import (
 from Interfaces.ATF2.DR_ATF2.ATF_DR_RFTrack_correction import (
     ATFDRRingCorrection,
 )
+from Interfaces.ATF2.DR_ATF2.ATF_DR_RFTrack_state import (
+    apply_known_machine_state,
+    capture_known_machine_state,
+)
 
 
 class TestATFDRRFTrackLattice(unittest.TestCase):
@@ -186,6 +190,45 @@ class TestATFDRRFTrackLattice(unittest.TestCase):
             0.01 * suggestion.rms_before,
         )
         self.assertLess(actual_rms, 0.001 * suggestion.rms_before)
+
+    def test_known_machine_state_copies_strengths_and_actuator_settings(self):
+        source = build_atf_dr_lattice()
+        p_over_q = -NOMINAL_MOMENTUM_MEV_C
+        source["QM10R.1"].set_K1L(
+            p_over_q, source["QM10R.1"].get_K1L(p_over_q) * 1.01
+        )
+        source["SD1R.1"].set_K2L(
+            p_over_q, source["SD1R.1"].get_K2L(p_over_q) * 0.99
+        )
+        source["BH1R.1"].set_K1L(source["BH1R.1"].get_K1L() * 1.02)
+        source["ZH1R"].set_kick(p_over_q, 0.25, 0.0)
+        source_correction = ATFDRRingCorrection(source)
+        source_correction.set_skew_strength("SD1R.1$SKEW", 2e-4)
+
+        state = capture_known_machine_state(source)
+        target = build_atf_dr_lattice()
+        apply_known_machine_state(target, state)
+
+        self.assertAlmostEqual(
+            target["QM10R.1"].get_K1L(p_over_q),
+            source["QM10R.1"].get_K1L(p_over_q),
+        )
+        self.assertAlmostEqual(
+            target["SD1R.1"].get_K2L(p_over_q),
+            source["SD1R.1"].get_K2L(p_over_q),
+        )
+        self.assertAlmostEqual(
+            target["BH1R.1"].get_K1L(), source["BH1R.1"].get_K1L()
+        )
+        self.assertAlmostEqual(
+            target["ZH1R"].get_kick(p_over_q)[0],
+            source["ZH1R"].get_kick(p_over_q)[0],
+        )
+        target_correction = ATFDRRingCorrection(target)
+        self.assertAlmostEqual(
+            target_correction.get_skew_strength("SD1R.1$SKEW"), 2e-4
+        )
+
 
 
 if __name__ == "__main__":

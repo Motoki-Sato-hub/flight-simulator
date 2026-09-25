@@ -252,6 +252,33 @@ def emittance_from_bunch(bunch, *, turns: int) -> EmittanceResult:
     )
 
 
+def emittance_from_native_covariance(
+    covariance_native: np.ndarray, *, turns: int
+) -> EmittanceResult:
+    """Calculate emittances from a RF-Track-native 6D covariance matrix.
+
+    The native coordinate order is ``[mm, mrad, mm, mrad, ct, p]``.  This
+    companion to :func:`emittance_from_bunch` is useful for a repeated,
+    linearised one-turn-map calculation: it avoids tracking a finite bunch at
+    every turn while retaining the same covariance and emittance conventions.
+    """
+    covariance_native = np.asarray(covariance_native, dtype=float)
+    if covariance_native.shape != (6, 6):
+        raise ValueError("covariance_native must have shape (6, 6)")
+    covariance = _native_to_transverse_covariance(covariance_native)
+    projected_x, projected_y, eigen = _emittances_from_transverse_covariance(
+        covariance
+    )
+    return EmittanceResult(
+        turns=int(turns),
+        survived_particles=0,
+        projected_x_m_rad=projected_x,
+        projected_y_m_rad=projected_y,
+        eigen_emittances_m_rad=eigen,
+        covariance_m_rad=covariance,
+    )
+
+
 def _native_to_transverse_covariance(covariance: np.ndarray) -> np.ndarray:
     """Convert [mm, mrad, mm, mrad] covariance to [m, rad, m, rad]."""
     return np.asarray(covariance[:4, :4], dtype=float) * 1e-6

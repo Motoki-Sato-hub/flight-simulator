@@ -30,7 +30,8 @@ SKIP_RUN = os.environ.get("ATF_DR_CURRENT_ENSEMBLE_SKIP_RUN", "0") == "1"
 def _result_path(seed: int) -> Path:
     return ANALYSIS / (
         "kubo2003_rftrack_procedure_result_20111111b_SF1R_"
-        f"probe_0p01mrad_solver_svd_rcond_1em02_seed_{seed}_scale_0p1.json"
+        "probe_0p01mrad_solver_svd_response_nominal_offset_1_roll_1_"
+        f"rcond_1em02_seed_{seed}_scale_0p1_ramp_0p25_0p25_steps_20.json"
     )
 
 
@@ -45,6 +46,10 @@ def main():
         "ATF_DR_KUBO_RESPONSE_KICK_RAD": "1e-5",
         "ATF_DR_KUBO_SKEW_FAMILY": "SF1R",
         "ATF_DR_KUBO_COD_DISPERSION_SOLVER": "svd",
+        # A 10%-Table-I scan stays on the same periodic branch with these
+        # larger numerical homotopy steps; they do not alter the error model.
+        "ATF_DR_KUBO_RAMP_INITIAL_INCREMENT": "0.25",
+        "ATF_DR_KUBO_RAMP_MAX_INCREMENT": "0.25",
     })
     rows = []
     failures = []
@@ -83,6 +88,7 @@ def main():
         "settings": {
             "seeds_requested": list(SEEDS), "magnet_error_scale": 0.1,
             "response_probe_mrad": 0.01, "cod_dispersion_solver": "svd",
+            "ramp_initial_increment": 0.25, "ramp_max_increment": 0.25,
         },
         "successful_cases": rows,
         "failures": failures,

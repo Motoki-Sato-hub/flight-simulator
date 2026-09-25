@@ -157,6 +157,76 @@ def get_magnet_centres(
     return centres
 
 
+# Historical ATF design values quoted as *half apertures* in the NLC/ATF
+# damping-ring design report, Chapter 3.3.3:
+# https://cds.cern.ch/record/450524/files/slac-r-559.pdf
+#
+# * 12 mm standard aperture in the arcs;
+# *  6 mm mask in the south straight;
+# *  5 mm photon masks in wiggler sections;
+# *  5 mm extraction-kicker vacuum chamber.
+#
+# The 2011 SAD daihon does not encode a chamber/survey table, so these values
+# must not be expanded into a complete loss model by assumption.  Only the
+# extraction-kicker restriction can be located unambiguously in this export:
+# its line sequence is ``IEX KIX KIX`` and yields KIX.1/KIX.2 in RF-Track.
+HISTORICAL_ATF_DR_DESIGN_HALF_APERTURES_MM = {
+    "arc_standard": 12.0,
+    "south_straight_mask": 6.0,
+    "wiggler_photon_mask": 5.0,
+    "extraction_kicker_chamber": 5.0,
+}
+HISTORICAL_ATF_DR_APERTURE_SOURCE = (
+    "NLC/ATF damping-ring design report, Chapter 3.3.3, "
+    "https://cds.cern.ch/record/450524/files/slac-r-559.pdf"
+)
+
+
+def get_historical_extraction_kicker_apertures(
+    lattice_data_path: str | Path | None = None,
+    *,
+    shape: str = "circular",
+) -> dict[str, tuple[float, float, str]]:
+    """Return the safely located historical 5-mm KIX half-aperture screen.
+
+    This intentionally returns only ``KIX`` instances.  It is a partial
+    historical-design loss screen, not an ATF transmission aperture table:
+    the source values for arcs, wiggler photon masks, and the south-straight
+    mask cannot be mapped to all corresponding 2011 SAD elements without a
+    survey/engineering chamber map.  The source quotes a half aperture but
+    does not establish the cross-section geometry; ``shape='circular'`` is a
+    stated RF-Track study assumption, not an engineering claim.  Replace it
+    when chamber drawings/survey data are available.
+    """
+    data = load_lattice_data(lattice_data_path)
+    definitions = data["definitions"]
+    occurrences: Counter[str] = Counter()
+    bpm_index = 0
+    drift_index = 0
+    apertures: dict[str, tuple[float, float]] = {}
+    for source_name in data["sequence"]:
+        definition = definitions[source_name]
+        element_type = str(definition["type"])
+        attributes = definition["attributes"]
+        angle = float(attributes.get("ANGLE", 0.0))
+        occurrences[source_name] += 1
+        if element_type == "DRIFT" or (element_type == "BEND" and angle == 0.0):
+            drift_index += 1
+        if source_name == "M":
+            bpm_index += 1
+        instance_name = _instance_name(
+            source_name, element_type, occurrences, bpm_index, drift_index
+        )
+        if source_name == "KIX":
+            half_aperture = HISTORICAL_ATF_DR_DESIGN_HALF_APERTURES_MM[
+                "extraction_kicker_chamber"
+            ]
+            apertures[instance_name] = (half_aperture, half_aperture, shape)
+    if not apertures:
+        raise ValueError("The selected SAD export has no KIX extraction-kicker element")
+    return apertures
+
+
 def _instance_name(
     source_name: str,
     element_type: str,

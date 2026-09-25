@@ -2,11 +2,12 @@
 
 The script deliberately does *not* claim a physical DR injection model.  The
 historical SAD Linac+BT line and the DR ring start at different coordinate
-origins, and the septum, injection kicker, longitudinal synchronization, and
-apertures between them are not represented.  It records the affine transverse
-handoff required to map the Linac+BT design particle to the DR periodic closed
-orbit, then uses that explicitly labelled provisional handoff for a one-turn
-DR survival check.
+origins.  The BT line itself includes the historical septa and nominal BK1R
+kicker through IPZT, but their survey/pulse calibration into the DR periodic
+coordinates, longitudinal synchronization, and apertures are not represented.
+It records the affine transverse handoff required to map the Linac+BT design
+particle to the DR periodic closed orbit, then uses that explicitly labelled
+provisional handoff for a one-turn DR survival check.
 
 The SAD conversion project is found beside ``flight-simulator`` by default;
 set ``ATF2_SAD_RFT_ROOT`` to override it.  No control-system or real-machine
@@ -41,20 +42,32 @@ class TransverseHandoff:
 
     Coordinates are ``[x_mm, xp_mrad, y_mm, yp_mrad]``.  The default created
     by :meth:`reference_anchored` is intentionally only an identity map plus
-    a design-particle offset.  A surveyed linear transport map and measured
-    injection-kicker/septum settings must replace it before this becomes an
+    a design-particle offset.  The SAD BT line already contains its historical
+    septa and nominal BK1R kicker, but a surveyed IPZT-to-RING0 map and the
+    measured pulsed settings must replace this handoff before it becomes an
     injection model.
     """
 
     matrix: np.ndarray
     offset_mm_mrad: np.ndarray
     provenance: str
+    source_dispersion_mm_mrad: np.ndarray | None = None
+    target_dispersion_mm_mrad: np.ndarray | None = None
+    reference_momentum_mev_c: float | None = None
 
     def __post_init__(self) -> None:
         if np.asarray(self.matrix).shape != (4, 4):
             raise ValueError("handoff matrix must have shape (4, 4)")
         if np.asarray(self.offset_mm_mrad).shape != (4,):
             raise ValueError("handoff offset must have shape (4,)")
+        dispersions = (self.source_dispersion_mm_mrad, self.target_dispersion_mm_mrad)
+        if any(item is not None for item in dispersions):
+            if any(item is None for item in dispersions):
+                raise ValueError("source and target dispersion must be supplied together")
+            if any(np.asarray(item).shape != (4,) for item in dispersions):
+                raise ValueError("handoff dispersions must each have shape (4,)")
+            if self.reference_momentum_mev_c is None or self.reference_momentum_mev_c <= 0.0:
+                raise ValueError("a positive reference momentum is required with dispersion")
 
     @classmethod
     def reference_anchored(
@@ -68,6 +81,64 @@ class TransverseHandoff:
             provenance="reference-anchored identity map; not a surveyed injection map",
         )
 
+    @staticmethod
+    def _normalising_matrix(beta_m: float, alpha: float) -> np.ndarray:
+        """Return the unit-determinant Courant--Snyder normalising matrix."""
+        if beta_m <= 0.0:
+            raise ValueError("Twiss beta must be positive")
+        root_beta = float(np.sqrt(beta_m))
+        return np.array(
+            ((root_beta, 0.0), (-alpha / root_beta, 1.0 / root_beta)),
+            dtype=float,
+        )
+
+    @classmethod
+    def twiss_dispersion_matched(
+        cls,
+        source_coordinates: np.ndarray,
+        target_coordinates: np.ndarray,
+        *,
+        source_twiss: tuple[float, float, float, float],
+        target_twiss: tuple[float, float, float, float],
+        source_dispersion_mm_mrad: np.ndarray,
+        target_dispersion_mm_mrad: np.ndarray,
+        reference_momentum_mev_c: float,
+        provenance: str | None = None,
+    ) -> "TransverseHandoff":
+        """Make a zero-phase 4D symplectic Twiss/dispersion matching map.
+
+        This maps the *design covariance* at the historical BT endpoint to
+        the chosen DR RING0 reference point.  It is useful as a reproducible
+        optics baseline, but is explicitly not a surveyed IPZT-to-RING0 map:
+        longitudinal path length, septum/kicker pulse calibration, coupling,
+        and an arbitrary betatron phase remain outside this construction.
+        """
+        bx_s, ax_s, by_s, ay_s = source_twiss
+        bx_t, ax_t, by_t, ay_t = target_twiss
+        x_map = cls._normalising_matrix(bx_t, ax_t) @ np.linalg.inv(
+            cls._normalising_matrix(bx_s, ax_s)
+        )
+        y_map = cls._normalising_matrix(by_t, ay_t) @ np.linalg.inv(
+            cls._normalising_matrix(by_s, ay_s)
+        )
+        matrix = np.zeros((4, 4), dtype=float)
+        matrix[:2, :2] = x_map
+        matrix[2:, 2:] = y_map
+        source = np.asarray(source_coordinates, dtype=float)
+        target = np.asarray(target_coordinates, dtype=float)
+        return cls(
+            matrix=matrix,
+            offset_mm_mrad=target - matrix @ source,
+            provenance=(
+                provenance
+                or "zero-phase symplectic Twiss/dispersion match from SAD BT IPZT "
+                "to RFTrack DR RING0; design-optics baseline, not surveyed injection map"
+            ),
+            source_dispersion_mm_mrad=np.asarray(source_dispersion_mm_mrad, dtype=float),
+            target_dispersion_mm_mrad=np.asarray(target_dispersion_mm_mrad, dtype=float),
+            reference_momentum_mev_c=float(reference_momentum_mev_c),
+        )
+
     def apply(self, coordinates: np.ndarray) -> np.ndarray:
         coordinates = np.asarray(coordinates, dtype=float)
         if coordinates.shape != (4,):
@@ -76,12 +147,85 @@ class TransverseHandoff:
             self.offset_mm_mrad, dtype=float
         )
 
+    def apply_phase_space(self, phase_space: np.ndarray) -> np.ndarray:
+        """Apply the 4D affine map and its optional first-order dispersion.
+
+        ``phase_space`` follows RF-Track's ``[x, xp, y, yp, ct, p]`` native
+        units.  With a matched-dispersion map, betatron coordinates are first
+        separated from the source dispersion and then reconstructed with the
+        target dispersion.  Time and momentum remain unchanged.
+        """
+        phase_space = np.asarray(phase_space, dtype=float)
+        if phase_space.ndim != 2 or phase_space.shape[1] != 6:
+            raise ValueError("phase_space must have shape (particles, 6)")
+        mapped = phase_space.copy()
+        matrix = np.asarray(self.matrix, dtype=float)
+        mapped[:, :4] = (
+            matrix @ phase_space[:, :4].T
+        ).T + np.asarray(self.offset_mm_mrad, dtype=float)
+        if self.source_dispersion_mm_mrad is not None:
+            delta = (
+                phase_space[:, 5] - float(self.reference_momentum_mev_c)
+            ) / float(self.reference_momentum_mev_c)
+            source = np.asarray(self.source_dispersion_mm_mrad, dtype=float)
+            target = np.asarray(self.target_dispersion_mm_mrad, dtype=float)
+            mapped[:, :4] += np.outer(delta, target - matrix @ source)
+        return mapped
+
     def as_dict(self) -> dict[str, object]:
         return {
             "matrix": np.asarray(self.matrix, dtype=float).tolist(),
             "offset_mm_mrad": np.asarray(self.offset_mm_mrad, dtype=float).tolist(),
             "provenance": self.provenance,
+            "source_dispersion_mm_mrad": (
+                None if self.source_dispersion_mm_mrad is None
+                else np.asarray(self.source_dispersion_mm_mrad, dtype=float).tolist()
+            ),
+            "target_dispersion_mm_mrad": (
+                None if self.target_dispersion_mm_mrad is None
+                else np.asarray(self.target_dispersion_mm_mrad, dtype=float).tolist()
+            ),
+            "reference_momentum_mev_c": self.reference_momentum_mev_c,
         }
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, object]) -> "TransverseHandoff":
+        """Restore an auditable handoff exported by :meth:`as_dict`.
+
+        This is intentionally a small data-only adapter: measurement fitting,
+        file ownership, and any controls connection remain outside the lattice
+        model.  Unknown keys are rejected so an incomplete calibration is not
+        silently treated as a valid handoff.
+        """
+        expected = {
+            "matrix", "offset_mm_mrad", "provenance",
+            "source_dispersion_mm_mrad", "target_dispersion_mm_mrad",
+            "reference_momentum_mev_c",
+        }
+        unknown = set(payload) - expected
+        missing = {"matrix", "offset_mm_mrad", "provenance"} - set(payload)
+        if unknown or missing:
+            raise ValueError(
+                "handoff JSON has unexpected/missing keys: "
+                f"unknown={sorted(unknown)}, missing={sorted(missing)}"
+            )
+        return cls(
+            matrix=np.asarray(payload["matrix"], dtype=float),
+            offset_mm_mrad=np.asarray(payload["offset_mm_mrad"], dtype=float),
+            provenance=str(payload["provenance"]),
+            source_dispersion_mm_mrad=(
+                None if payload.get("source_dispersion_mm_mrad") is None else
+                np.asarray(payload["source_dispersion_mm_mrad"], dtype=float)
+            ),
+            target_dispersion_mm_mrad=(
+                None if payload.get("target_dispersion_mm_mrad") is None else
+                np.asarray(payload["target_dispersion_mm_mrad"], dtype=float)
+            ),
+            reference_momentum_mev_c=(
+                None if payload.get("reference_momentum_mev_c") is None else
+                float(payload["reference_momentum_mev_c"])
+            ),
+        )
 
 
 def _sad_project_root() -> Path:
@@ -179,8 +323,7 @@ def run_handoff_audit(
             "transform": handoff.as_dict(),
             "longitudinal_coordinate": "not connected; transport flight time is discarded",
             "missing_physics": [
-                "BT-to-DR coordinate survey",
-                "septum and injection-kicker maps",
+                "surveyed IPZT-to-RING0 coordinate map and pulsed kicker settings",
                 "apertures and loss monitors",
                 "longitudinal RF synchronization and capture",
                 "measured injection Twiss and dispersion",
