@@ -907,6 +907,91 @@ class ATFDRRingCorrection:
             previous_norm = best_norm
         return selected
 
+    @classmethod
+    def _bounded_svd_solve(
+        cls,
+        matrix: np.ndarray,
+        target: np.ndarray,
+        maximum: float,
+        rcond: float,
+    ) -> tuple[np.ndarray, np.ndarray, int]:
+        """Solve a least-squares response with symmetric actuator limits.
+
+        This small active-set solver is intentionally expressed in terms of the
+        same SVD routine used by the legacy-style correction.  When a trial
+        command exceeds ``maximum``, it is fixed at that boundary and the
+        remaining free columns are solved again.  This is materially different
+        from solving first and clipping all commands afterwards: the latter
+        leaves a residual that free correctors could still reduce.
+
+        It implements the bounded part of the SAD ``cod.n`` / ``coddispersion.n``
+        selection contract in RFTrack kick units (rad).  It is not a general
+        nonlinear optimizer.
+        """
+        if maximum <= 0:
+            raise ValueError("maximum must be positive")
+        matrix = np.asarray(matrix, dtype=float)
+        target = np.asarray(target, dtype=float)
+        if matrix.ndim != 2 or target.shape != (matrix.shape[0],):
+            raise ValueError("matrix and target shapes are incompatible")
+
+        commands = np.zeros(matrix.shape[1], dtype=float)
+        free = np.ones(matrix.shape[1], dtype=bool)
+        singular_values = np.empty(0, dtype=float)
+        rank = 0
+        while np.any(free):
+            fixed = ~free
+            remaining_target = target - matrix[:, fixed] @ commands[fixed]
+            free_solution, singular_values, rank = cls._svd_solve(
+                matrix[:, free], remaining_target, rcond
+            )
+            free_indices = np.flatnonzero(free)
+            commands[free_indices] = free_solution
+            violating = np.abs(free_solution) > maximum
+            if not np.any(violating):
+                break
+            violating_indices = free_indices[violating]
+            commands[violating_indices] = np.sign(commands[violating_indices]) * maximum
+            free[violating_indices] = False
+        return commands, singular_values, rank
+
+    @classmethod
+    def _bounded_greedy_columns(
+        cls,
+        matrix: np.ndarray,
+        target: np.ndarray,
+        max_columns: int,
+        maximum: float,
+        rcond: float,
+    ) -> list[int]:
+        """Select columns by their *bounded* residual reduction.
+
+        SAD chooses its limited number of steerers after considering the
+        physical K0 bounds.  Keeping this separate from ``_greedy_columns``
+        preserves the latter as the uncomplicated unconstrained diagnostic.
+        """
+        selected: list[int] = []
+        remaining = list(range(matrix.shape[1]))
+        previous_norm = float(np.linalg.norm(target))
+        while remaining and len(selected) < max_columns:
+            best_column = None
+            best_norm = previous_norm
+            for candidate in remaining:
+                trial = selected + [candidate]
+                solution, _, _ = cls._bounded_svd_solve(
+                    matrix[:, trial], target, maximum, rcond
+                )
+                norm = float(np.linalg.norm(target - matrix[:, trial] @ solution))
+                if norm < best_norm:
+                    best_norm = norm
+                    best_column = candidate
+            if best_column is None:
+                break
+            selected.append(best_column)
+            remaining.remove(best_column)
+            previous_norm = best_norm
+        return selected
+
     def propose_orbit_correction(
         self,
         response: OrbitResponseResult,
@@ -947,26 +1032,42 @@ class ATFDRRingCorrection:
         else:
             if max_correctors <= 0:
                 raise ValueError("max_correctors must be positive")
-            selected_indices = self._greedy_columns(
+            selector = (
+                self._greedy_columns
+                if max_abs_delta is None
+                else self._bounded_greedy_columns
+            )
+            arguments = (
                 weighted_matrix,
                 weighted_target,
                 min(max_correctors, response.matrix.shape[1]),
                 rcond,
             )
+            selected_indices = (
+                selector(*arguments)
+                if max_abs_delta is None
+                else selector(
+                    weighted_matrix,
+                    weighted_target,
+                    min(max_correctors, response.matrix.shape[1]),
+                    float(max_abs_delta),
+                    rcond,
+                )
+            )
         if not selected_indices:
             raise ClosedOrbitError("No useful corrector columns were selected")
 
         selected_matrix = weighted_matrix[:, selected_indices]
-        selected_delta, singular_values, rank = self._svd_solve(
-            selected_matrix, weighted_target, rcond
+        solver = self._svd_solve if max_abs_delta is None else self._bounded_svd_solve
+        selected_delta, singular_values, rank = (
+            solver(selected_matrix, weighted_target, rcond)
+            if max_abs_delta is None
+            else solver(selected_matrix, weighted_target, float(max_abs_delta), rcond)
         )
         selected_delta *= float(gain)
         if max_abs_delta is not None:
             if max_abs_delta <= 0:
                 raise ValueError("max_abs_delta must be positive")
-            selected_delta = np.clip(
-                selected_delta, -float(max_abs_delta), float(max_abs_delta)
-            )
 
         delta = np.zeros(response.matrix.shape[1], dtype=float)
         delta[selected_indices] = selected_delta
@@ -1053,25 +1154,31 @@ class ATFDRRingCorrection:
         else:
             if max_correctors <= 0:
                 raise ValueError("max_correctors must be positive")
-            selected_indices = self._greedy_columns(
-                matrix,
-                target,
-                min(max_correctors, matrix.shape[1]),
-                rcond,
+            selected_indices = (
+                self._greedy_columns(
+                    matrix, target, min(max_correctors, matrix.shape[1]), rcond
+                )
+                if max_abs_delta is None
+                else self._bounded_greedy_columns(
+                    matrix, target, min(max_correctors, matrix.shape[1]),
+                    float(max_abs_delta), rcond,
+                )
             )
         if not selected_indices:
             raise ClosedOrbitError("No useful corrector columns were selected")
 
-        selected_delta, singular_values, rank = self._svd_solve(
-            matrix[:, selected_indices], target, rcond
+        selected_matrix = matrix[:, selected_indices]
+        selected_delta, singular_values, rank = (
+            self._svd_solve(selected_matrix, target, rcond)
+            if max_abs_delta is None
+            else self._bounded_svd_solve(
+                selected_matrix, target, float(max_abs_delta), rcond
+            )
         )
         selected_delta *= float(gain)
         if max_abs_delta is not None:
             if max_abs_delta <= 0:
                 raise ValueError("max_abs_delta must be positive")
-            selected_delta = np.clip(
-                selected_delta, -float(max_abs_delta), float(max_abs_delta)
-            )
 
         delta = np.zeros(response.dispersion_matrix.shape[1], dtype=float)
         delta[selected_indices] = selected_delta
@@ -1148,25 +1255,36 @@ class ATFDRRingCorrection:
         else:
             if max_skew_correctors <= 0:
                 raise ValueError("max_skew_correctors must be positive")
-            selected_indices = self._greedy_columns(
-                weighted_matrix,
-                weighted_target,
-                min(max_skew_correctors, response.matrix.shape[1]),
-                rcond,
+            selected_indices = (
+                self._greedy_columns(
+                    weighted_matrix,
+                    weighted_target,
+                    min(max_skew_correctors, response.matrix.shape[1]),
+                    rcond,
+                )
+                if max_abs_delta is None
+                else self._bounded_greedy_columns(
+                    weighted_matrix,
+                    weighted_target,
+                    min(max_skew_correctors, response.matrix.shape[1]),
+                    float(max_abs_delta), rcond,
+                )
             )
         if not selected_indices:
             raise ClosedOrbitError("No useful skew-corrector columns were selected")
 
-        selected_delta, singular_values, rank = self._svd_solve(
-            weighted_matrix[:, selected_indices], weighted_target, rcond
+        selected_matrix = weighted_matrix[:, selected_indices]
+        selected_delta, singular_values, rank = (
+            self._svd_solve(selected_matrix, weighted_target, rcond)
+            if max_abs_delta is None
+            else self._bounded_svd_solve(
+                selected_matrix, weighted_target, float(max_abs_delta), rcond
+            )
         )
         selected_delta *= float(gain)
         if max_abs_delta is not None:
             if max_abs_delta <= 0:
                 raise ValueError("max_abs_delta must be positive")
-            selected_delta = np.clip(
-                selected_delta, -float(max_abs_delta), float(max_abs_delta)
-            )
 
         delta = np.zeros(response.matrix.shape[1], dtype=float)
         delta[selected_indices] = selected_delta
