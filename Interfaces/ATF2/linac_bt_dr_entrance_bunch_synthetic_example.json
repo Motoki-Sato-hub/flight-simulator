@@ -1,0 +1,12 @@
+{
+  "coordinate_order": "x_mm,xp_mrad,y_mm,yp_mrad,t_mm_c,p_mev_c",
+  "coordinates_mm_mrad_mm_c_mev_c": [
+    [0.0060, 0.0020, -0.0040, 0.0015, -0.1000, 82.35546122],
+    [-0.0060, -0.0020, 0.0040, -0.0015, 0.1000, 82.37546122],
+    [0.0030, -0.0030, 0.0060, -0.0020, -0.0500, 82.36546122],
+    [-0.0030, 0.0030, -0.0060, 0.0020, 0.0500, 82.36546122]
+  ],
+  "charge_e": 1000000000.0,
+  "provenance": "Synthetic four-particle wiring fixture; not a measured ATF distribution and not for physics conclusions.",
+  "location": "IPP1L"
+}

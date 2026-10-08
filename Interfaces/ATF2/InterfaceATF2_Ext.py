@@ -1410,6 +1410,18 @@ class InterfaceATF2_Ext(AbstractMachineInterface):
         key = k.replace(" ", "").upper()
         return aliases.get(key, k)
 
+    def get_linear_knob_names(self):
+        return list(self.linear_matrix.keys())
+
+    def get_nonlinear_knob_names(self):
+        return list(self.nonlinear_matrix.keys())
+
+    def get_corrector_knob_names(self):
+        return list(self.corrector_knob_pvs.keys())
+
+    def get_zscan_knob_names(self):
+        return [self.zscan_knob_name]
+
     def set_linear_knob(self, knob_name: str, value: float):
         key = self._normalize_linear_knob_name(knob_name)
         if key not in self._linear_knob_values:

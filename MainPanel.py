@@ -67,7 +67,7 @@ class MainWindow(QMainWindow):
         self.handling("Emittance_Measurement_GUI.py")
 
     def handle_knobs_click(self):
-        self.handling("IPBSM_Opt_GUI.py")
+        self.handling("Knobs/GUIs/IPBSM_Opt_GUI.py")
 
     def handle_compute_response_matrix_click(self):
         self.handling("ComputeResponseMatrix_GUI.py")
