@@ -1,10 +1,11 @@
-import sys, time, math, os, threading, struct, ctypes
+import RF_Track as rft
+import sys, time, math, os, threading, struct, ctypes, subprocess
 import numpy as np
 from epics import PV, ca, caget
 from Interfaces.AbstractMachineInterface import AbstractMachineInterface
 from collections import defaultdict
-import subprocess
-
+from Interfaces.ATF2.InterfaceATF2_Ext_RFTrack import InterfaceATF2_Ext_RFTrack
+from Interfaces.ATF2.MagKi import MagKiWrapper, load_mag_ki
 
 class CurrentDropToZeroError(RuntimeError):
     def __init__(self, message, *, target=None, readback=None, magnets=None):
@@ -13,68 +14,19 @@ class CurrentDropToZeroError(RuntimeError):
         self.readback = dict(readback or {})
         self.magnets = list(magnets or [])
 
-
-class MagKiWrapper:
-    MODE_K_TO_I = 1
-    MODE_I_TO_K = 2
-
-    def __init__(self, library_path):
-        self.library_path = os.path.abspath(str(library_path))
-        self.lib = ctypes.CDLL(self.library_path)
-        self._func = self.lib.mag_ki_main
-        self._func.argtypes = [
-            ctypes.c_int,
-            ctypes.c_char_p,
-            ctypes.c_float,
-            ctypes.POINTER(ctypes.c_float),
-            ctypes.POINTER(ctypes.c_float),
-            ctypes.POINTER(ctypes.c_float),
-            ctypes.POINTER(ctypes.c_float),
-        ]
-        self._func.restype = ctypes.c_int
-
-    def _call(self, mode, name, energy_GeV, k_main=0.0, current_main=0.0):
-        kvalue = (ctypes.c_float * 2)(float(k_main), 0.0)
-        current = (ctypes.c_float * 2)(float(current_main), 0.0)
-        field = (ctypes.c_float * 2)(0.0, 0.0)
-        efflen = ctypes.c_float(0.0)
-        status = int(
-            self._func(
-                int(mode),
-                str(name).encode("ascii"),
-                ctypes.c_float(float(energy_GeV)),
-                kvalue,
-                current,
-                ctypes.byref(efflen),
-                field,
-            )
-        )
-        if status != 1:
-            raise RuntimeError(f"mag_ki_main failed for {name}, mode={mode}, status={status}")
-        return {
-            "k": float(kvalue[0]),
-            "current": float(current[0]),
-            "efflen": float(efflen.value),
-            "field": float(field[0]),
-        }
-
-    def current_to_k1(self, name, current_A, energy_GeV):
-        return self._call(self.MODE_I_TO_K, name, energy_GeV, current_main=current_A)["k"]
-
-    def k1_to_current(self, name, k1, energy_GeV):
-        return self._call(self.MODE_K_TO_I, name, energy_GeV, k_main=k1)["current"]
-
-
 class InterfaceATF2_Ext(AbstractMachineInterface):
     def get_name(self):
         return 'ATF2_Ext'
 
-    def __init__(self, nsamples=10, nominal_intensity=0.15, wfs_intensity=0.1):
+    def __init__(self, bg_shots=10.0, nsamples=10, nominal_intensity=0.15, wfs_intensity=0.1):
+        self.screen_backgrounds = {}
         self.nsamples = nsamples
         self.bpm_sample_interval_s = 0.5
         self.twiss_path = os.path.join(os.path.dirname(__file__), 'Ext_ATF2', 'ATF2_EXT_FF_v5.2.twiss')
-        self.electronmass = 0.51099895  # MeV/c^2
-        self.Pref = 1.2999999e3  # MeV/c, until a PV is specified
+        self.lattice = rft.Lattice(self.twiss_path)
+        self.lattice.set_tt_nsteps(0)
+        self.electronmass = 0.51099895 # MeV/c^2
+        self.Pref = 1.2999999e3 # MeV/c, until a PV is specified
         self.screen_names = ['OTR0X', 'OTR1X', 'OTR2X', 'OTR3X']
         self.screen_pv_names = {
             'OTR0X': 'mOTR0',
@@ -82,17 +34,18 @@ class InterfaceATF2_Ext(AbstractMachineInterface):
             'OTR2X': 'mOTR2',
             'OTR3X': 'mOTR3'
         }
+        self.is_simulation = False
         self.bpm_sample_interval_s = 0.5
-        self.screen_image_shape = (960, 1280)  # image size = 1280 x 960
-
+        self.screen_image_shape = (960, 1280) # image size = 1280 x 960
+        self.tracking_interface = InterfaceATF2_Ext_RFTrack()
         # Bpms and correctors in beamline order
         sequence = [
             "MB2X", "ZV1X", "QF1X", "ZV2X", "QD2X", "QF3X", "ZH1X", "ZV3X", "QF4X",
             "ZH2X", "QD5X", "ZV4X", "ZV5X", "QF6X", "QF7X", "ZH3X", "QD8X", "ZV6X",
             "QF9X", "ZH4X", "FONTK1", "ZV7X", "FONTP1", "QD10X", "ZH5X", "QF11X",
             "FONTK2", "ZV8X", "FONTP2", "QD12X", "ZH6X", "QF13X", "QD14X", "FONTP3",
-            "ZH7X", "QF15X", "ZV9X", "QD16X", "ZH8X", "QF17X", "ZV10X", "QD18X", "OTR0X",
-            "ZH9X", "QF19X", "OTR1X", "ZV11X", "QD20X", "OTR2X", "ZH10X", "QF21X", "OTR3X", "IPT1", "IPT2",
+            "ZH7X", "QF15X", "ZV9X", "QD16X", "ZH8X", "QF17X", "ZV10X", "QD18X","OTR0X",
+            "ZH9X", "QF19X","OTR1X", "ZV11X", "QD20X","OTR2X" , "ZH10X", "QF21X", "OTR3X","IPT1", "IPT2",
             "IPT3", "IPT4", "QM16FF", "ZH1FF", "ZV1FF", "QM15FF", "QM14FF", "FB2FF",
             "QM13FF", "QM12FF", "QM11FF", "QD10BFF", "QD10AFF", "QF9BFF",
             "MSF6FF", "QF9AFF", "QD8FF", "QF7FF", "QD6FF", "QF5BFF", "MSF5FF",
@@ -101,16 +54,15 @@ class InterfaceATF2_Ext(AbstractMachineInterface):
         ]
 
         quadrupoles = [
-            "QF1X", "QD2X", "QF3X", "QF4X", "QD5X", "QF6X", "QF7X", "QD8X", "QF9X", "QD10X",
-            "QF11X", "QD12X", "QF13X", "QD14X", "QF15X", "QD16X", "QF17X", "QD18X", "QF19X",
-            "QD20X", "QF21X", "QM16FF", "QM15FF", "QM14FF", "QM13FF", "QM12FF", "QM11FF", "QD10BFF", "QD10AFF",
-            "QF9BFF",
+            "QF1X", "QD2X", "QF3X","QF4X", "QD5X", "QF6X", "QF7X","QD8X","QF9X", "QD10X",
+            "QF11X", "QD12X", "QF13X", "QD14X", "QF15X","QD16X", "QF17X","QD18X","QF19X",
+            "QD20X", "QF21X", "QM16FF", "QM15FF", "QM14FF", "QM13FF", "QM12FF", "QM11FF", "QD10BFF", "QD10AFF", "QF9BFF",
             "QF9AFF", "QD8FF", "QF7FF", "QD6FF", "QF5BFF", "QF5AFF", "QD4BFF", "QD4AFF", "QF3FF", "QD2BFF", "QD2AFF",
-            "QF1FF", "QD0FF"
+            "QF1FF",  "QD0FF"
         ]
         self.quadrupoles = list(quadrupoles)
 
-        screens = ['OTR0X', 'OTR1X', 'OTR2X', 'OTR3X']
+        screens = ['OTR0X','OTR1X','OTR2X','OTR3X']
         self.screens = list(screens)
         # ATF2' BPMs Epics names
         # https://atf.kek.jp/atfbin/view/ATF/EPICS_DATABASE
@@ -123,28 +75,21 @@ class InterfaceATF2_Ext(AbstractMachineInterface):
             "MQM11FF", "MQD10BFF", "MQD10AFF", "MQF9AFF",
             "MQD8FF", "MQF7FF", "MQF5BFF", "MQD4BFF", "MQF3FF", "MQD2BFF", "MQD2AFF",
             "MSF1FF", "MPREIP", "MIPB"
-        ]
+            ]
 
         # keep monitor indexes from MONITOR_INDEX_TO_NAME as the source of truth.
         self.MONITOR_INDEX_TO_NAME = {
             0: "MB1X", 1: "MB2X", 2: "MQF1X", 3: "MQD2X", 4: "MQF3X", 5: "MQF4X", 6: "MQD5X", 7: "MQF6X", 8: "MQF7X",
-            9: "MQD8X", 10: "MQF9X", 11: "MQD10X", 12: "MQF11X", 13: "MQD12X", 14: "MQF13X", 15: "MQD14X", 16: "MQF15X",
-            17: "MQD16X",
-            18: "MQF17X", 19: "MQD18X", 20: "MQF19X", 21: "MQD20X", 22: "MQF21X", 23: "IPBPM1", 24: "IPBPM2",
-            25: "nBPM1",
-            26: "nBPM2", 27: "nBPM3", 28: "MQM16FF", 29: "MQM15FF", 30: "MQM14FF", 31: "MFB2FF", 32: "MQM13FF",
-            33: "MQM12FF",
-            34: "MFB1FF", 35: "MQM11FF", 36: "MQD10BFF", 37: "MQD10AFF", 38: "MQF9BFF", 39: "MSF6FF", 40: "MQF9AFF",
-            41: "MQD8FF",
-            42: "MQF7FF", 43: "MQD6FF", 44: "MQF5BFF", 45: "MSF5FF", 46: "MQF5AFF", 47: "MQD4BFF", 48: "MSD4FF",
-            49: "MQD4AFF",
-            50: "MQF3FF", 51: "MQD2BFF", 52: "MQD2AFF", 53: "MSF1FF", 54: "MQF1FF", 55: "MSD0FF", 56: "MQD0FF",
-            57: "M1&2IP", 58: "MPIP",
+            9: "MQD8X", 10: "MQF9X", 11: "MQD10X", 12: "MQF11X", 13: "MQD12X", 14: "MQF13X", 15: "MQD14X", 16: "MQF15X", 17: "MQD16X",
+            18: "MQF17X", 19: "MQD18X", 20: "MQF19X", 21: "MQD20X", 22: "MQF21X", 23: "IPBPM1", 24: "IPBPM2", 25: "nBPM1",
+            26: "nBPM2", 27: "nBPM3", 28: "MQM16FF", 29: "MQM15FF", 30: "MQM14FF", 31: "MFB2FF", 32: "MQM13FF", 33: "MQM12FF",
+            34: "MFB1FF", 35: "MQM11FF", 36: "MQD10BFF", 37: "MQD10AFF", 38: "MQF9BFF", 39: "MSF6FF", 40: "MQF9AFF", 41: "MQD8FF",
+            42: "MQF7FF", 43: "MQD6FF", 44: "MQF5BFF", 45: "MSF5FF", 46: "MQF5AFF", 47: "MQD4BFF", 48: "MSD4FF", 49: "MQD4AFF",
+            50: "MQF3FF", 51: "MQD2BFF", 52: "MQD2AFF", 53: "MSF1FF", 54: "MQF1FF", 55: "MSD0FF", 56: "MQD0FF", 57: "M1&2IP", 58: "MPIP",
             59: "MDUMP", 60: "ICT1X", 61: "ICTDUMP", 62: "MW1X", 63: "MW1IP", 64: "MPREIP", 65: "MIPA", 66: "MIPB"}
 
         self.sextupoles = ["SF6FF", "SK4FF", "SK3FF", "SF5FF", "SD4FF", "SK2FF", "SK1FF", "SF1FF", "SD0FF"]
-        self.screens = ['OTR0X', 'OTR1X', 'OTR2X', 'OTR3X']
-        # self.quadrupoles = ['OTR0X', 'OTR1X','OTR2X','OTR3X']
+        self.screens = ['OTR0X', 'OTR1X','OTR2X','OTR3X']
 
         # Use list comprehension to filter out strings starting with 'Z' or 'z'
         monitors_from_sequence = [string for string in sequence if not string.lower().startswith('z')]
@@ -156,14 +101,13 @@ class InterfaceATF2_Ext(AbstractMachineInterface):
             print(f'Unknown bpms {bpms_unknown} removed from list')
 
         # Only retain BPMs in config file which are known by Epics
-        sequence_filtered = [element for element in sequence if
-                             (element in monitors) or element.lower().startswith('z')]
+        sequence_filtered = [element for element in sequence if (element in monitors) or element.lower().startswith('z')]
 
         # Subset of BPMs and correctors from the config file
         self.sequence = sequence_filtered
         self.sequence_raw = list(sequence)
         self.movable_magnets = [string for string in self.sequence_raw if string.upper().startswith(('MQ', 'MS'))]
-        # self.bpms = [string for string in self.sequence if not string.lower().startswith('z')]
+        #self.bpms = [string for string in self.sequence if not string.lower().startswith('z')]
         self.corrs = [string for string in self.sequence if string.lower().startswith('z')]
         self.qmag_alias_to_canonical = {}
         for name in self.movable_magnets:
@@ -181,14 +125,13 @@ class InterfaceATF2_Ext(AbstractMachineInterface):
         # self.bpm_indexes = [index for index, string in enumerate(monitors) if string in self.bpms]
 
         '''
-
            Sato-san's way:
            BPM order must follow MONITOR_INDEX_TO_NAME, independent from sequence.
-
+           
         '''
         name_to_monitor_index = {name: index for index, name in self.MONITOR_INDEX_TO_NAME.items()}
-        # self.bpms = [element for element in self.sequence if not element.lower().startswith('z') and element in name_to_monitor_index]
-        # self.bpm_indexes = np.array([name_to_monitor_index[name] for name in self.bpms], dtype=int)
+        #self.bpms = [element for element in self.sequence if not element.lower().startswith('z') and element in name_to_monitor_index]
+        #self.bpm_indexes = np.array([name_to_monitor_index[name] for name in self.bpms], dtype=int)
         self.bpm_indexes = np.array(sorted(self.MONITOR_INDEX_TO_NAME.keys()), dtype=int)
         self.bpms = [self.MONITOR_INDEX_TO_NAME[i] for i in self.bpm_indexes]
 
@@ -200,36 +143,12 @@ class InterfaceATF2_Ext(AbstractMachineInterface):
         self.nominal_laser_intensity = nominal_intensity
         self.laser_intensity = PV('RFGun:LaserIntensity1:Read').get()
         self.test_laser_intensity = wfs_intensity
-        # PV('RFGun:LaserIntensity1:Read').get()
+        self.energy_frequency_offset_khz = 4.0
+        #PV('RFGun:LaserIntensity1:Read').get()
 
         # k_T_per_A : integrated-gradient slope GL/I [T/A]
         # L_m       : magnetic length
-        self.mag_ki = None
-        mag_ki_library_candidates = []
-
-        env_mag_ki_library_path = os.environ.get("ATF2_MAG_KI_LIB", "")
-        if env_mag_ki_library_path:
-            mag_ki_library_candidates.append(env_mag_ki_library_path)
-
-        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-        libmagnet_dir = os.path.join(repo_root, "Machine specifics, user implementations", "ATF2", "libmagnet")
-        mag_ki_library_candidates.extend([
-            os.path.join(libmagnet_dir, "libmagnet.dylib"),
-            os.path.join(libmagnet_dir, "libmagnet.so"),
-        ])
-
-        for mag_ki_library_path in mag_ki_library_candidates:
-            if not mag_ki_library_path or not os.path.exists(mag_ki_library_path):
-                continue
-            try:
-                self.mag_ki = MagKiWrapper(mag_ki_library_path)
-                print(f"Loaded ATF2 mag_ki library: {mag_ki_library_path}")
-                break
-            except Exception as exc:
-                print(f"ATF2 mag_ki library '{mag_ki_library_path}': {exc} not loaded")
-
-        if self.mag_ki is None:
-            print("ATF2 mag_ki library not loaded.")
+        self.mag_ki = load_mag_ki()
 
         # IPBSM hooks and FF knob definitions (real machine)
         self.error_history = []
@@ -239,36 +158,24 @@ class InterfaceATF2_Ext(AbstractMachineInterface):
         self.datafile = "/atf/data/ipbsm/knob/knob_fringe_result_v2.dat"
 
         self.linear_matrix = {
-            "Ax": {"SD0FF": (-116.5, 0), "SF1FF": (-35.2, 0), "SD4FF": (-37.8, 0), "SF5FF": (0, 0),
-                   "SF6FF": (-623.4, 0)},
-            "Ex": {"SD0FF": (-813.0, 0), "SF1FF": (793.5, 0), "SD4FF": (-137.9, 0), "SF5FF": (0, 0),
-                   "SF6FF": (1492.9, 0)},
+            "Ax": {"SD0FF": (-116.5, 0), "SF1FF": (-35.2, 0), "SD4FF": (-37.8, 0), "SF5FF": (0, 0), "SF6FF": (-623.4, 0)},
+            "Ex": {"SD0FF": (-813.0, 0), "SF1FF": (793.5, 0), "SD4FF": (-137.9, 0), "SF5FF": (0, 0), "SF6FF": (1492.9, 0)},
             "Ay": {"SD0FF": (-98.9, 0), "SF1FF": (-9.6, 0), "SD4FF": (-246.7, 0), "SF5FF": (0, 0), "SF6FF": (120.0, 0)},
-            "Ey": {"SD0FF": (0, 374.1), "SF1FF": (0, -120.0), "SD4FF": (0, -451.3), "SF5FF": (0, 0),
-                   "SF6FF": (0, -64.3)},
+            "Ey": {"SD0FF": (0, 374.1), "SF1FF": (0, -120.0), "SD4FF": (0, -451.3), "SF5FF": (0, 0), "SF6FF": (0, -64.3)},
             "Coup1": {"SD0FF": (0, -100), "SF1FF": (0, 100), "SD4FF": (0, 0), "SF5FF": (0, 0), "SF6FF": (0, 0)},
             "Coup2": {"SD0FF": (0, 107.8), "SF1FF": (0, 4.2), "SD4FF": (0, 152.6), "SF5FF": (0, 0), "SF6FF": (0, 90.4)},
-            "Spare1": {"SD0FF": (-676.0, 0), "SF1FF": (-316.0, 0), "SD4FF": (252.0, 0), "SF5FF": (587.0, 0),
-                       "SF6FF": (593.0, 0)},
-            "Spare2": {"SD0FF": (0, 78.0), "SF1FF": (0, 188.0), "SD4FF": (0, -55.0), "SF5FF": (-179.0, 0),
-                       "SF6FF": (0, 38.0)},
+            "Spare1": {"SD0FF": (-676.0, 0), "SF1FF": (-316.0, 0), "SD4FF": (252.0, 0), "SF5FF": (587.0, 0), "SF6FF": (593.0, 0)},
+            "Spare2": {"SD0FF": (0, 78.0), "SF1FF": (0, 188.0), "SD4FF": (0, -55.0), "SF5FF": (-179.0, 0), "SF6FF": (0, 38.0)},
             "Spare3": {"SD0FF": (0, 0), "SF1FF": (0, 0), "SD4FF": (0, 1), "SF5FF": (0, 0), "SF6FF": (0, 0)},
         }
         self.nonlinear_matrix = {
-            "Y24": {"SK1FF": 0.0, "SK2FF": 0.0, "SK3FF": 0.0, "SK4FF": 0.0, "SD0FF": 0.119, "SF1FF": -0.013,
-                    "SD4FF": -0.554, "SF5FF": -0.083, "SF6FF": -0.175},
-            "Y46": {"SK1FF": 0.0, "SK2FF": 0.0, "SK3FF": 0.0, "SK4FF": 0.0, "SD0FF": 0.259, "SF1FF": -0.057,
-                    "SD4FF": 1.049, "SF5FF": -0.106, "SF6FF": -0.056},
-            "Y22": {"SK1FF": -1.629, "SK2FF": 0.174, "SK3FF": 1.024, "SK4FF": 2.435, "SD0FF": 0.0, "SF1FF": 0.0,
-                    "SD4FF": 0.0, "SF5FF": 0.0, "SF6FF": 0.0},
-            "Y26": {"SK1FF": 1.763, "SK2FF": -0.126, "SK3FF": 0.463, "SK4FF": -0.701, "SD0FF": 0.0, "SF1FF": 0.0,
-                    "SD4FF": 0.0, "SF5FF": 0.0, "SF6FF": 0.0},
-            "Y66": {"SK1FF": 5.571, "SK2FF": -0.207, "SK3FF": -4.668, "SK4FF": -6.673, "SD0FF": 0.0, "SF1FF": 0.0,
-                    "SD4FF": 0.0, "SF5FF": 0.0, "SF6FF": 0.0},
-            "Y44": {"SK1FF": 0.037, "SK2FF": 1.614, "SK3FF": -0.458, "SK4FF": -0.186, "SD0FF": 0.0, "SF1FF": 0.0,
-                    "SD4FF": 0.0, "SF5FF": 0.0, "SF6FF": 0.0},
-            "Spare": {"SK1FF": 0.0, "SK2FF": 0.0, "SK3FF": 0.0, "SK4FF": 0.0, "SD0FF": 0.0, "SF1FF": 0.0, "SD4FF": 0.0,
-                      "SF5FF": 0.0, "SF6FF": 0.0},
+            "Y24": {"SK1FF": 0.0, "SK2FF": 0.0, "SK3FF": 0.0, "SK4FF": 0.0, "SD0FF": 0.119, "SF1FF": -0.013, "SD4FF": -0.554, "SF5FF": -0.083, "SF6FF": -0.175},
+            "Y46": {"SK1FF": 0.0, "SK2FF": 0.0, "SK3FF": 0.0, "SK4FF": 0.0, "SD0FF": 0.259, "SF1FF": -0.057, "SD4FF": 1.049, "SF5FF": -0.106, "SF6FF": -0.056},
+            "Y22": {"SK1FF": -1.629, "SK2FF": 0.174, "SK3FF": 1.024, "SK4FF": 2.435, "SD0FF": 0.0, "SF1FF": 0.0, "SD4FF": 0.0, "SF5FF": 0.0, "SF6FF": 0.0},
+            "Y26": {"SK1FF": 1.763, "SK2FF": -0.126, "SK3FF": 0.463, "SK4FF": -0.701, "SD0FF": 0.0, "SF1FF": 0.0, "SD4FF": 0.0, "SF5FF": 0.0, "SF6FF": 0.0},
+            "Y66": {"SK1FF": 5.571, "SK2FF": -0.207, "SK3FF": -4.668, "SK4FF": -6.673, "SD0FF": 0.0, "SF1FF": 0.0, "SD4FF": 0.0, "SF5FF": 0.0, "SF6FF": 0.0},
+            "Y44": {"SK1FF": 0.037, "SK2FF": 1.614, "SK3FF": -0.458, "SK4FF": -0.186, "SD0FF": 0.0, "SF1FF": 0.0, "SD4FF": 0.0, "SF5FF": 0.0, "SF6FF": 0.0},
+            "Spare": {"SK1FF": 0.0, "SK2FF": 0.0, "SK3FF": 0.0, "SK4FF": 0.0, "SD0FF": 0.0, "SF1FF": 0.0, "SD4FF": 0.0, "SF5FF": 0.0, "SF6FF": 0.0},
         }
         self.corrector_knob_pvs = {
             "corrector 1": {
@@ -311,72 +218,120 @@ class InterfaceATF2_Ext(AbstractMachineInterface):
         for alias in self.qmag_alias_to_canonical.keys():
             # Use the alias itself for mover PVs (e.g. QM16FF:MAG:DES:X).
             self.qmag_pv[alias] = self._build_qmag_pv_names(alias)
+        self.bg_shots = int(bg_shots)
 
-    def _quad_calib(self, name):
-
-        ## to fix, quad calib doesnt exist anymore!!!!
-        canonical = self.qmag_alias_to_canonical.get(name, name)
-        calib = self.QUAD_CALIB.get(name) or self.QUAD_CALIB.get(canonical)
-        if calib is None:
-            raise KeyError(f"No A-K1 calibration for quadrupole '{name}' ")
-        k_T_per_A = float(calib["k_T_per_A"])
-        L_m = float(calib["L_m"])
-        if k_T_per_A == 0.0 or L_m == 0.0:
-            raise ValueError(f"Calibration for '{name}' is 0. ")
-        return k_T_per_A, L_m
-
-    def current_to_k1(self, name, current_A):
+    def current_to_k1l(self, name, current_A):
         current_A = float(current_A)
         if not np.isfinite(current_A):
             return np.nan
         canonical = self.qmag_alias_to_canonical.get(name, name)
         mag_name_for_library = canonical[1:] if canonical.startswith("M") else canonical
         if self.mag_ki is not None:
-            return self.mag_ki.current_to_k1(mag_name_for_library, current_A, self.Pref / 1e3)
+            return self.mag_ki.current_to_k1l(mag_name_for_library, current_A, self.Pref / 1e3)
+        else: raise KeyError(f"No A-K1 calibration for '{name}' ")
 
-        k_T_per_A, L_m = self._quad_calib(name)
-        integrated_gradient_T = k_T_per_A * current_A
-        gradient_T_per_m = integrated_gradient_T / L_m
-        beam_rigidity_Tm = 3.3356409519815204 * (self.Pref / 1e3)
-        k1 = gradient_T_per_m / beam_rigidity_Tm
-        if mag_name_for_library.upper().startswith("QD"):
-            k1 = -abs(k1)
-        return float(k1)
-
-    def k1_to_current(self, name, k1):
+    def k1l_to_current(self, name, k1):
         k1 = float(k1)
         if not np.isfinite(k1):
             raise ValueError(f"Cannot convert K1 for quadrupole '{name}': {k1}")
         canonical = self.qmag_alias_to_canonical.get(name, name)
         mag_name_for_library = canonical[1:] if canonical.startswith("M") else canonical
         if self.mag_ki is not None:
-            return self.mag_ki.k1_to_current(mag_name_for_library, k1, self.Pref / 1e3)
+            return self.mag_ki.k1l_to_current(mag_name_for_library, k1, self.Pref / 1e3)
+        else:
+            raise KeyError(f"No A-K1 calibration for '{name}' ")
 
-        k_T_per_A, L_m = self._quad_calib(name)
-        beam_rigidity_Tm = 3.3356409519815204 * (self.Pref / 1e3)
-        gradient_T_per_m = abs(k1) * beam_rigidity_Tm
-        integrated_gradient_T = gradient_T_per_m * L_m
-        current_A = integrated_gradient_T / k_T_per_A
-        return float(current_A)
+    def update_tracking_model_with_clibmagnet(self, nominal_bdes_value = None, nominal_bact_value = None, names=None):
+        if isinstance(names, str):
+            names = [names]
+        bact = np.array(nominal_bact_value, dtype=float)
+        bdes = np.array(nominal_bdes_value, dtype=float)
+        self.log(f"Updating tracking model for {names}..."
+                 f"Current nominal bdes value from the machine [1/m]: {bdes}, "
+                 f"Current nominal bact value from the machine [1/m]: {bact}")
+        self.tracking_interface.set_quadrupoles(names, bact)
+        self.log(f"Reading new values set in the lattice:")
+        print(self.tracking_interface.get_quadrupoles(names)["bdes"])
+        self.log(f"Changed model values to match the lattice!")
 
     def insert_screen(self, screen_name):
         screen_pv_name = self.screen_pv_names.get(screen_name)
         if screen_pv_name is None:
             raise ValueError(f"Unknown screen: {screen_name}")
+        self.log(f"Getting the state of screen {screen_name}...")
         status = PV(f'{screen_pv_name}:Target:READ:INOUT').get()
+        self.log(f"Current status of screen {screen_name} is {status}...")
         PV(f"{screen_pv_name}:Target:WRITE:IN").put(1)
+        if not self._wait_for_screen_target_position(screen_name, 1):
+            raise RuntimeError(f"Screen {screen_name} was not inserted within time.")
 
     def extract_screen(self, screen_name):
         screen_pv_name = self.screen_pv_names.get(screen_name)
         if screen_pv_name is None:
             raise ValueError(f"Unknown screen: {screen_name}")
+        self.log(f"Getting the state of screen {screen_name}...")
+        status = PV(f'{screen_pv_name}:Target:READ:INOUT').get()
+        self.log(f"Current status of screen {screen_name} is {status}...")
         PV(f"{screen_pv_name}:Target:WRITE:OUT").put(1)
+        if not self._wait_for_screen_target_position(screen_name, 0):
+            raise RuntimeError(f"Screen {screen_name} was not extracted within time.")
+
+    def _map_quadrupoles_names_from_lattice(self, name):
+        name = str(name)
+        elements =  []
+        for quad_name in [name, f"{name}_1", f"{name}_2"]:
+            try:
+                quad_parts = self.lattice[quad_name]
+            except Exception as e:
+                continue
+            if not isinstance(quad_parts, list):
+                quad_parts = [quad_parts]
+            elements.extend(quad_parts) # adding each element of the list, not the whole list as an element
+        return elements
+
+    def _get_elements_positions_show_beamline(self, names=None):
+        if isinstance(names, str):
+            names = [names]
+
+        all_names = []
+        all_s = []
+        all_l = []
+        s_pos = 0.0
+
+        for element in self.lattice['*']:
+            element_name = element.get_name()
+            try:
+                element_length = float(element.get_length())
+            except Exception:
+                element_length = 0.0
+
+            if names is None or element_name in names:
+                all_names.append(element_name)
+                all_s.append(s_pos)
+                all_l.append(element_length)
+
+            s_pos += element_length
+
+        return {
+            "names": all_names,
+            "S": np.array(all_s, dtype=float),
+        }
+
+    def _give_elements_to_show_beamline(self, quad_selected):
+        mapped_quad_elements = self._map_quadrupoles_names_from_lattice(quad_selected)
+        if not isinstance(mapped_quad_elements, list):
+            mapped_quad_elements = [mapped_quad_elements]
+        start_quad_element_name = mapped_quad_elements[0]
+        return start_quad_element_name
 
     def get_beam_factors(self):
         # TO BE REPLACED WITH A PV OF REAL BEAM ENERGY
         gamma_rel = np.sqrt((self.Pref / self.electronmass) ** 2 + 1.0)
         beta_rel = np.sqrt(1.0 - 1.0 / gamma_rel ** 2)
-        return gamma_rel, beta_rel
+        beta_gamma = gamma_rel * beta_rel
+        if not np.isfinite(beta_gamma) or beta_gamma <= 0:
+            raise RuntimeError("Invalid beam factors")
+        return gamma_rel, beta_rel, beta_gamma
 
     def _read_twiss_file(self):
         with open(self.twiss_path, "r") as file:
@@ -386,7 +341,7 @@ class InterfaceATF2_Ext(AbstractMachineInterface):
         columns = lines[star_symbol].lstrip("*").split()
         return lines, columns, dollar_sign
 
-    def _get_twiss_s_positions(self, names):
+    def  _get_twiss_s_positions(self, names):
         names = list(names)
         lines, columns, dollar_sign = self._read_twiss_file()
         try:
@@ -408,8 +363,7 @@ class InterfaceATF2_Ext(AbstractMachineInterface):
         return [s_pos.get(name, np.nan) for name in names]
 
     @staticmethod
-    def make_safe_float(value,
-                        default=np.nan):  # so even if pv returns none, empty array or whatever, interface still works
+    def make_safe_float(value, default = np.nan): #so even if pv returns none, empty array or whatever, interface still works
         try:
             if value is None:
                 return float(default)
@@ -420,13 +374,16 @@ class InterfaceATF2_Ext(AbstractMachineInterface):
         except Exception:
             return float(default)
 
-    def _valid_pv_value(self, pv_names, default=np.nan):
+    def _wait_for_pv_readback(self, pv_name, target, tolerance=1e-3, timeout=10.0):
+        return self._wait_for_readback(lambda: self.make_safe_float(PV(pv_name).get(), default=np.nan), target, description=pv_name, tolerance=tolerance, timeout=timeout)
+
+    def _valid_pv_value(self, pv_names, default = np.nan):
         for pv_name in pv_names:
             try:
                 value = caget(pv_name)
             except Exception:
                 continue
-            value = self.make_safe_float(value, default=np.nan)
+            value = self.make_safe_float(value, default = np.nan)
             if np.isfinite(value):
                 return value
         return float(default)
@@ -434,26 +391,33 @@ class InterfaceATF2_Ext(AbstractMachineInterface):
     def get_movable_magnets_names(self):
         return self.movable_magnets
 
-    def predict_emittance_scan_response(self, quad_name, screens, K1_values, emit_x, emit_y, beta_x0, beta_y0, alpha_x0,
-                                        alpha_y0, stop_checker=None, reference_screen=None):
-        # from Interfaces.ATF2.InterfaceATF2_Ext_RFTrack import InterfaceATF2_Ext_RFTrack
-        # screens_data =
-        # simulated_interface = InterfaceATF2_Ext_RFTrack()
-        # simulated_interface.set_quadrupoles()
-        pass
+    def get_quadrupole_movers_names(self):
+        return list(self.qmags)
 
-    def _quadrupole_current_pv_name(self, name):
+    def predict_emittance_scan_response(self, *args, **kwargs): # from optimizer, delegates all variables to the simulation
+        return self.tracking_interface.predict_emittance_scan_response(*args, **kwargs)
+
+    def get_R_matrix_scan(self, *args, **kwargs):
+        return self.tracking_interface.get_R_matrix_scan(*args, **kwargs)
+
+    def get_phase_space_transport_to_screens(self, *args, **kwargs):
+        return self.tracking_interface.get_phase_space_transport_to_screens(*args, **kwargs)
+
+    def get_twiss_evolution(self, *args, **kwargs):
+        return self.tracking_interface.get_twiss_evolution(*args, **kwargs)
+
+    def _quadrupole_current_pv_name(self,name):
         if name.startswith("M") and name[1:].startswith(("QF", "QD", "QM")):
             return name[1:]
         return name
 
-    def _quad_mover_pv_name(self, name):
+    def _quad_mover_pv_name(self,name):
         return self.qmag_alias_to_canonical.get(name, name)
 
     def get_quadrupoles(self, names=None, include_pv_names=False):
         print(" 'get_quadrupoles' running...")
         if names is None:
-            names = self.quadrupoles  # quadrupoles names
+            names = self.quadrupoles # quadrupoles names
         if type(names) == str:
             names = [names]
         names = [name for name in names if name in self.quadrupoles]
@@ -489,8 +453,9 @@ class InterfaceATF2_Ext(AbstractMachineInterface):
         iact = np.array(iact, dtype=float)
 
         try:
-            bdes = np.array([self.current_to_k1(n, i) for n, i in zip(names, ides)], dtype=float)
-            bact = np.array([self.current_to_k1(n, i) for n, i in zip(names, iact)], dtype=float)
+            bdes = np.array([self.current_to_k1l(n, i) for n, i in zip(names, ides)], dtype=float)
+            bact = np.array([self.current_to_k1l(n, i) for n, i in zip(names, iact)], dtype=float)
+            self.update_tracking_model_with_clibmagnet(names=names, nominal_bdes_value = bdes, nominal_bact_value = bact)
         except Exception as exc:
             print(f"current to K1 conversion failed for quadrupoles {names}: {exc}")
             bdes = np.array([np.nan for _ in names], dtype=float)
@@ -498,8 +463,8 @@ class InterfaceATF2_Ext(AbstractMachineInterface):
 
         data = {
             "names": names,
-            "bdes": bdes,  # 1/m^2,
-            "bact": bact,  # 1/m^2
+            "bdes": bdes, # 1/m,
+            "bact": bact,  # 1/m
             "ides": np.array(ides, dtype=float),
             "iact": np.array(iact, dtype=float),
             "xdes": np.array(xdes, dtype=float),
@@ -513,20 +478,20 @@ class InterfaceATF2_Ext(AbstractMachineInterface):
             data["pvs"] = {name: dict(self.qmag_pv[name]) for name in names}
         return data
 
-    def set_quadrupoles(self, names, k1_values, track=True):
+    def set_quadrupoles(self, names, k1l_values, track=True):
         if type(names) == str:
             names = [names]
-        if not isinstance(k1_values, (list, tuple, np.ndarray)):
-            k1_values = [k1_values]
-        if len(names) != len(k1_values):
-            raise ValueError(f"len(names)={len(names)} != len(k1_values)={len(k1_values)} in set_quadrupoles")
+        if not isinstance(k1l_values, (list, tuple, np.ndarray)):
+            k1l_values = [k1l_values]
+        if len(names) != len(k1l_values):
+            raise ValueError(f"len(names)={len(names)} != len(k1l_values)={len(k1l_values)} in set_quadrupoles")
 
-        for name, k1 in zip(names, k1_values):
+        for name, k1 in zip(names, k1l_values):
             if name not in self.quadrupoles:
                 raise ValueError(f"Quadrupole '{name}' is not magnet list.")
             current_name = self._quadrupole_current_pv_name(name)
             print(name)
-            target_current = self.k1_to_current(current_name, float(k1))  # A
+            target_current = self.k1l_to_current(current_name, float(k1))  # A
             self._pv_put(f"{current_name}:currentWrite", float(target_current))
             self._wait_for_magnet_readback(current_name, float(target_current))
 
@@ -604,15 +569,13 @@ class InterfaceATF2_Ext(AbstractMachineInterface):
             v_factor = 1.0
         return h_factor, v_factor
 
-    def acquire_otr_image(self, screen_pv_name, move_screen=False):
+    def acquire_screen_image(self, screen_name, min_total_intensity=135000, max_retries=3):
         """
-        It might be super slow.
-        1 call of get_screens() will take 8s x number_of_screens
-        So, for 4 screens it's 32 seconds.
-        EM GUI calls get_screens() multiple times, every K1 change.
+        Acquires an OTR image with background subtraction.
+        Takes the background once, then loops the beam acquisition if the
+        total integrated intensity is below min_total_intensity.
         """
-
-        print(f"Acquiring data for {screen_pv_name}...")
+        screen_pv_name = self.screen_pv_names.get(screen_name)
         pv_in_name = f'{screen_pv_name}:Target:WRITE:IN'
         pv_out_name = f'{screen_pv_name}:Target:WRITE:OUT'
         pv_img_data_name = f'{screen_pv_name}:IMAGE:ArrayData'
@@ -621,80 +584,144 @@ class InterfaceATF2_Ext(AbstractMachineInterface):
         otr_out_pv = PV(pv_out_name)
         image_data_pv = PV(pv_img_data_name)
         image_acquire_pv = PV(pv_acquire_name)
-        if move_screen:
-            otr_in_pv.put(1)
-            print("Inserting the screen...")
-            time.sleep(5)
-        image_acquire_pv.put(1)
-        time.sleep(3)
-        img_data = image_data_pv.get()
-        image_acquire_pv.put(0)
-        if move_screen:
-            otr_out_pv.put(1)
-            print("Extracting the screen...")
-        img_reshaped = img_data.reshape(960, 1280)
-        return img_reshaped
+        bg_img = self.screen_backgrounds[screen_name]
+        print(f"Inserting screen {screen_name} for beam...")
+        self.insert_screen(screen_name)
+        time.sleep(5)
+        beam_frames = []
+        for attempt in range(1, max_retries + 1):
+            beam_frames = []
+            for i in range(5):
+                image_acquire_pv.put(1)
+                time.sleep(3)
+                beam_data = image_data_pv.get()
+                image_acquire_pv.put(0)
+                beam_frames.append(beam_data.reshape(960, 1280).astype(np.float64))
+            beam_img = np.median(beam_frames, axis=0)
+            subtracted_img = beam_img - bg_img
+            subtracted_img[subtracted_img < 0] = 0
+            tot_intensity = np.sum(subtracted_img)
+            if tot_intensity >= min_total_intensity:
+                break
+            else:
+                print(f" -> WARNING: Total intensity too low ({tot_intensity:,.0f} < threshold of {min_total_intensity:,.0f}).")
+                if attempt < max_retries:
+                    print(" -> Retaking beam image (keeping screen inserted)...\n")
+                else:
+                    print(" -> Max retries reached. Proceeding with the empty/low-intensity frame.")
+        print(" -> Retracting screen...")
+        otr_out_pv.put(1)
+        return subtracted_img, bg_img, beam_img
 
-    def _screen_data_from_image(self, image, hpixel, vpixel, screen_pv_name):
-        if image is None:
+    def _screen_data_from_image(self, image, hpixel, vpixel): # better be subtracted!
+        if image is None or np.asarray(image, dtype=float).ndim!=2 or np.asarray(image, dtype=float).size==0:
             return np.nan, np.nan, np.nan, np.nan, 0.0, np.zeros((1, 1)), np.array([0.0, 1.0]), np.array([0.0, 1.0])
-        img = np.asarray(image, dtype=float)
+
+        # I_xi_yi, I = I_beam - I_background
+        img = np.asarray(image, dtype=float).copy()
         img[~np.isfinite(img)] = 0.0
-        total = float(np.sum(img))  # intensity
-        ny, nx = img.shape  # rows, columns
-        if total <= 0.0 or nx == 0 or ny == 0:
-            hedges = np.arange(nx + 1, dtype=float) * (hpixel if np.isfinite(hpixel) and hpixel > 0 else 1)
-            vedges = np.arange(ny + 1, dtype=float) * (vpixel if np.isfinite(vpixel) and vpixel > 0 else 1)
-
+        img[img < 0] = 0.0
+        ny, nx = img.shape # e.g. ny = no. of rows, nx = no. of columns
+        j = np.arange(nx)
+        i = np.arange(ny)
+        summed_intensity = np.sum(img)
+        if summed_intensity <= 0:
+            hedges = (np.arange(nx + 1) - nx / 2) * hpixel
+            vedges = (np.arange(ny + 1) - ny / 2) * vpixel
             return np.nan, np.nan, np.nan, np.nan, 0.0, img, hedges, vedges
-
-        if not np.isfinite(hpixel) or hpixel <= 0:
-            hpixel = 1e-3
-        if not np.isfinite(vpixel) or vpixel <= 0:
-            vpixel = 1e-3
-
-        x_centers = (np.arange(nx, dtype=float) - 0.5 * (nx - 1)) * hpixel  # middle of the pixel
-        y_centers = (np.arange(ny, dtype=float) - 0.5 * (ny - 1)) * vpixel
         proj_x = np.sum(img, axis=0)
         proj_y = np.sum(img, axis=1)
-        x_mean = float(np.sum(x_centers * proj_x) / total)
-        y_mean = float(np.sum(y_centers * proj_y) / total)
-        sigx = float(np.sqrt(max(np.sum(((x_centers - x_mean) ** 2) * proj_x) / total, 0.0)))
-        sigy = float(np.sqrt(max(np.sum(((y_centers - y_mean) ** 2) * proj_y) / total, 0.0)))
-        # mOTR:analyzer:dispersion:selectedmotr
-        # hack to avoid background subtraction
-        command = f"caput mOTR:analyzer:dispersion:selectedmotr {screen_pv_name[-1]}"
-        result = subprocess.run(command, shell=True)
-        time.sleep(1)
-        result = subprocess.run(command, shell=True)
-        time.sleep(1)
-        result = subprocess.run(command, shell=True)
-        time.sleep(10)
-        sigx_pv = f"mOTR:analyzer:size:H"
-        sigy_pv = f"mOTR:analyzer:size:V"
-        sigx_prev = PV(sigx_pv).get()
-        sigy_prev = PV(sigy_pv).get()
-        ratio_sigmas_x = PV(sigx_pv).get() / sigx_prev
-        ratio_sigmas_y = PV(sigy_pv).get() / sigy_prev
-        while np.abs(ratio_sigmas_x) > 8 or np.abs(ratio_sigmas_y) > 8:
-            time.sleep(5)
-            sigx = PV(sigx_pv).get()
-            time.sleep(5)
-            sigy = PV(sigy_pv).get()
-            time.sleep(5)
-            sigx_prev = sigx
-            sigy_prev = sigy
 
-        print("sigx from precomputed PV: ", sigx)
-        print("sigy from precomputed PV: ", sigy)
-        # np.average(h[1:], weights=np.sum(i,axis=0)) # andrea's suggestion
-        # mOTR:analyzer:size
-        hedges = (np.arange(nx + 1, dtype=float) - 0.5 * nx) * hpixel
-        vedges = (np.arange(ny + 1, dtype=float) - 0.5 * ny) * vpixel
+        # center of each pixel can be expressed as: x_j = (j - (N_x - 1)/2)*hpixel, y_i = (i - (N_i - 1)/2)vhpixel
 
-        return x_mean, y_mean, sigx, sigy, total, img, hedges, vedges
+        '''
+        x_centers and y_centers are arrays containing the physical coordinates of the centre of each pixel. 
+        They allow to convert the image from pixel intensities into beam position and beam size.
+        '''
+        x_pixels_positions = (j - (nx - 1) / 2) * hpixel # coordinates of centre of each pixel
+        y_pixels_positions = (i - (ny - 1) / 2) * vpixel
+        x_mean_positions = np.sum((x_pixels_positions * proj_x) / summed_intensity)
+        y_mean_positions = np.sum((y_pixels_positions * proj_y) / summed_intensity)
 
-    def get_screens(self, names=None, move_screen=False):
+        sigx = np.sqrt(np.sum((x_pixels_positions - x_mean_positions)**2 * proj_x) / summed_intensity)
+        sigy = np.sqrt(np.sum((y_pixels_positions - y_mean_positions)**2 * proj_y) / summed_intensity)
+
+        hedges = (np.arange(nx+1) - nx / 2) * hpixel
+        vedges = (np.arange(ny+1) - ny / 2) * vpixel
+
+
+        '''
+        Logic commented is for reading sigx and sigy from precomputed PVs, not from image analysis.
+        
+        # # mOTR:analyzer:dispersion:selectedmotr
+        # # hack to avoid background subtraction
+        # command = f"caput mOTR:analyzer:dispersion:selectedmotr {screen_pv_name[-1]}"
+        # result = subprocess.run(command,shell=True)
+        # time.sleep(1)
+        # result = subprocess.run(command,shell=True)
+        # time.sleep(1)
+        # result = subprocess.run(command,shell=True)
+        # time.sleep(10)
+        # sigx_pv = f"mOTR:analyzer:size:H"
+        # sigy_pv = f"mOTR:analyzer:size:V"
+        # sigx_pv_value = self.make_safe_float(PV(sigx_pv).get(), default=np.nan)
+        # sigy_pv_value = self.make_safe_float(PV(sigy_pv).get(), default=np.nan)
+        # 
+        # sigx_from_image = float(np.sqrt(max(np.sum(((x_centers - x_mean) ** 2) * proj_x) / total, 0.0))) # mm
+        # sigy_from_image = float(np.sqrt(max(np.sum(((y_centers - y_mean) ** 2) * proj_y) / total, 0.0))) # mm
+
+        # # sigx_prev = self.make_safe_float(PV(sigx_pv).get(), default=np.nan)
+        # # sigy_prev = self.make_safe_float(PV(sigy_pv).get(), default=np.nan)
+        # # max_retries = 5
+        # # for attempt in range(max_retries):
+        # #     time.sleep(5)
+        # #     sigx_new = self.make_safe_float(PV(sigx_pv).get(), default=np.nan)
+        # #     sigy_new = self.make_safe_float(PV(sigy_pv).get(), default=np.nan)
+        # #     if not np.isfinite(sigx_prev) or not np.isfinite(sigy_prev):
+        # #         sigx_prev, sigy_prev = sigx_new, sigy_new
+        # #         continue
+        # #     if sigx_prev <= 0 or sigy_prev <= 0 or sigx_new <= 0 or sigy_new <= 0:
+        # #         sigx_prev, sigy_prev = sigx_new, sigy_new
+        # #         continue
+        # #     change_x = max(sigx_new / sigx_prev, sigx_prev / sigx_new)
+        # #     change_y = max(sigy_new / sigy_prev, sigy_prev / sigy_new)
+        # #     if change_x <= 8 and change_y <= 8:
+        # #         sigx = sigx_new / 1000.0
+        # #         sigy = sigy_new / 1000.0
+        # #         break
+        # #     print("Screen size changed too much between measurements of sigx and sigy. Remeasuring...")
+        # #     sigx_prev, sigy_prev = sigx_new, sigy_new
+        # # else:
+        # #     sigx = sigx_prev / 1000.0 if np.isfinite(sigx_prev) else sigx
+        # #     sigy = sigy_prev / 1000.0 if np.isfinite(sigy_prev) else sigy
+        # 
+        # print("sigx from precomputed PV: ", sigx_pv_value)
+        # print("sigy from precomputed PV: ", sigy_pv_value)
+        # print("sigx from image analysis: ", sigx_from_image)
+        # print("sigy from image analysis: ", sigy_from_image)
+        # # np.average(h[1:], weights=np.sum(i,axis=0)) # andrea's suggestion
+        # # mOTR:analyzer:size
+        '''
+        return x_mean_positions, y_mean_positions, sigx, sigy, summed_intensity, img, hedges, vedges
+
+    def _wait_for_screen_target_position(self, screen_name, target, timeout=10.0, poll_interval=0.05):
+        screen_pv_name = self.screen_pv_names.get(screen_name)
+        t0 = time.perf_counter()
+        status = np.nan
+        while time.perf_counter() - t0 < timeout:
+            status = self.make_safe_float(PV(f'{screen_pv_name}:Target:READ:INOUT').get(), default=np.nan)
+            if status == 0 and target == 0:
+                return True
+            if status > 0 and target > 0:
+                return True
+            time.sleep(poll_interval)
+        self.log(
+            f'Warning: {screen_name} did not reach target state = {target:.6g} '
+            f'within {timeout:.2f}s. Last readback = {status:.6g}'
+        )
+        return False
+
+    def get_screens(self, names=None):
         print('Reading screens...')
         if isinstance(names, str):
             names = [names]
@@ -708,33 +735,40 @@ class InterfaceATF2_Ext(AbstractMachineInterface):
         sigy_list = []
         sum_list = []
         images = []
+        background_images = []
+        beam_images = []
         hedges_all = []
         vedges_all = []
-        inout_list = []  # is screen in or out
+        inout_list = [] # is screen in or out
 
         for screen_name in selected_names:
             screen_pv_name = self.screen_pv_names.get(screen_name)
-            if screen_pv_name is None:
-                hpixel_list.append(np.nan)
-                vpixel_list.append(np.nan)
-                xb_list.append(np.nan)
-                yb_list.append(np.nan)
-                sigx_list.append(np.nan)
-                sigy_list.append(np.nan)
-                sum_list.append(0.0)
-                images.append(np.zeros((1, 1)))
-                hedges_all.append(np.array([0.0, 1.0]))
-                vedges_all.append(np.array([0.0, 1.0]))
-                inout_list.append(np.nan)
-                continue
-
             otr_id = screen_name.replace('OTR', '')
-            hpixel, vpixel = self.get_pixel_calibrations(screen_pv_name)
-            status = self.make_safe_float(caget(f'{screen_pv_name}:Target:READ:INOUT'), default=np.nan)
-            image = self.acquire_otr_image(screen_pv_name, move_screen=False)
-            x_mean, y_mean, sigx, sigy, total, image, hedges, vedges = self._screen_data_from_image(image, hpixel,
-                                                                                                    vpixel,
-                                                                                                    screen_pv_name)
+            hpixel_um, vpixel_um = self.get_pixel_calibrations(screen_pv_name)
+            hpixel = hpixel_um / 1000.0
+            vpixel = vpixel_um / 1000.0
+
+            try:
+                if screen_name not in self.screen_backgrounds:
+                    self.log(f"Acquiring background image for {screen_name}.")
+                    self.acquire_screen_background(screen_name, frames=10)
+                subtracted_img, bg_img, beam_img = self.acquire_screen_image(screen_name)
+                x_mean, y_mean, sigx, sigy, total, img, hedges, vedges = self._screen_data_from_image(subtracted_img, hpixel, vpixel)
+
+            except Exception as e:
+                self.log(f"Couldn't acquire screen image for {screen_name}, because: {e}")
+                x_mean = np.nan
+                y_mean = np.nan
+                sigx = np.nan
+                sigy = np.nan
+                total = 0.0
+                subtracted_img = np.zeros((1, 1), dtype=float)
+                bg_img = np.zeros((1, 1), dtype=float)
+                beam_img = np.zeros((1, 1), dtype=float)
+                hedges = np.array([0.0, 1.0], dtype=float)
+                vedges = np.array([0.0, 1.0], dtype=float)
+
+            status = PV(f'{screen_pv_name}:Target:READ:INOUT').get()
             hpixel_list.append(hpixel)
             vpixel_list.append(vpixel)
             xb_list.append(x_mean)
@@ -742,44 +776,84 @@ class InterfaceATF2_Ext(AbstractMachineInterface):
             sigx_list.append(sigx)
             sigy_list.append(sigy)
             sum_list.append(total)
-            images.append(image)
-            hedges_all.append(hedges)
-            vedges_all.append(vedges)
+            images.append(np.asarray(subtracted_img, dtype=float))
+            background_images.append(np.asarray(bg_img, dtype=float))
+            beam_images.append(np.asarray(beam_img, dtype=float))
+            hedges_all.append(np.asarray(hedges, dtype=float))
+            vedges_all.append(np.asarray(vedges, dtype=float))
             inout_list.append(status)
 
         screens = {
             "names": selected_names,
-            "hpixel": np.asarray(hpixel_list, dtype=float),
-            "vpixel": np.asarray(vpixel_list, dtype=float),
-            "x": np.asarray(xb_list, dtype=float),
-            "y": np.asarray(yb_list, dtype=float),
-            "sigx": np.asarray(sigx_list, dtype=float),
-            "sigy": np.asarray(sigy_list, dtype=float),
+            "hpixel": np.asarray(hpixel_list, dtype=float), # mm/pixel
+            "vpixel": np.asarray(vpixel_list, dtype=float), # mm/pixel
+            "x": np.asarray(xb_list, dtype=float), # mm
+            "y": np.asarray(yb_list, dtype=float), # mm
+            "sigx": np.asarray(sigx_list, dtype=float), # mm
+            "sigy": np.asarray(sigy_list, dtype=float), # mm
             "sum": np.asarray(sum_list, dtype=float),
-            "hedges": hedges_all,
-            "vedges": vedges_all,
+            "hedges": hedges_all, # mm
+            "vedges": vedges_all, # mm
             "images": images,
-            "S": np.asarray(s_positions, dtype=float),  # "S": np.full(len(selected_names), np.nan)
+            "background_images": background_images,
+            "beam_images": beam_images,
+            "S": np.asarray(s_positions, dtype=float), # "S": np.full(len(selected_names), np.nan)
             "inout": np.asarray(inout_list, dtype=float),
         }
         return screens
 
-    def change_energy(self, delta_freq=4):
-        PV('RAMP:CONTROL_ON_SW').put(1)
-        time.sleep(2)
+    def acquire_screen_background(self, screen_name, frames = None):
+        if frames is None: frames = self.bg_shots
+        self.extract_screen(screen_name)
+        screen_pv_name = self.screen_pv_names.get(screen_name)
+        pv_in_name = f'{screen_pv_name}:Target:WRITE:IN'
+        pv_out_name = f'{screen_pv_name}:Target:WRITE:OUT'
+        pv_img_data_name = f'{screen_pv_name}:IMAGE:ArrayData'
+        pv_acquire_name = f'{screen_pv_name}:CAMERA:Acquire'
+        otr_in_pv = PV(pv_in_name)
+        otr_out_pv = PV(pv_out_name)
+        image_data_pv = PV(pv_img_data_name)
+        image_acquire_pv = PV(pv_acquire_name)
+        background_frames = []
+        if frames == 0:
+            bg_img = np.zeros((960, 1280), dtype=float)
+        else:
+            for frame in range(frames):
+                self.log(f"Acquiring {frame}/{frames} background frames...")
+                image_acquire_pv.put(1)
+                time.sleep(1)
+                bg_data = image_data_pv.get()
+                image_acquire_pv.put(0)
+                background_frames.append(bg_data.reshape(960, 1280).astype(np.float64))
+                self.log(f"Acquired {frame}/{frames} background frames...")
+            bg_img = np.median(background_frames, axis=0)
+            if not background_frames:
+                raise RuntimeError(f"No background frames available for {screen_name}")
+            self.log(f"Acquired {frames} background frames. Calculating the median...")
+            bg_img = np.median(np.stack(background_frames, axis=0), axis=0)
+            self.log(f"Median calculated.")
+            self.screen_backgrounds[screen_name] = bg_img
+
+        return bg_img
+
+    def _pv_readback(self, pv_name):
+        return lambda: self.make_safe_float(PV(pv_name).get(), default=np.nan)
+
+    def change_energy(self, delta_freq=None):
+        if delta_freq is None:
+            delta_freq = self.energy_frequency_offset_khz
+        self._set_and_verify(lambda: PV('RAMP:CONTROL_ON_SW').put(1), self._pv_readback('RAMP:CONTROL_ON_SW'), 1, description="RAMP:CONTROL_ON_SW (energy change)", tolerance=1e-3)
         # delta_freq in kHz
         ### delta_freq MUST MATCH :MI2: to EPICS --> means "MINUS2"
         # PV('RAMP:MI2:ONOFF_SW').put(1)
-        PV('RAMP:PL4:ONOFF_SW').put(1)
-        time.sleep(2)
+        self._set_and_verify(lambda: PV('RAMP:PL4:ONOFF_SW').put(1), self._pv_readback('RAMP:PL4:ONOFF_SW'), 1, description="RAMP:PL4:ONOFF_SW (energy change)", tolerance=1e-3)
         DR_freq = 714e3  # 714 MHz in kHz
         DR_momentum_compaction = 2.1e-3
         dP_P = -float(delta_freq) / DR_freq / DR_momentum_compaction
         return dP_P
 
     def reset_energy(self):
-        PV('RAMP:CONTROL_OFF_SW').put(0)
-        time.sleep(2)
+        self._set_and_verify(lambda: PV('RAMP:CONTROL_OFF_SW').put(0), self._pv_readback('RAMP:CONTROL_ON_SW'), 0, description="RAMP:CONTROL_ON_SW (energy reset)", tolerance=1e-3)
 
     def change_intensity(self, laserintensity=None):
         if laserintensity is None:
@@ -787,24 +861,43 @@ class InterfaceATF2_Ext(AbstractMachineInterface):
         print(f'Changing laser intensity to {laserintensity}...')
         self.laser_intensity = self.make_safe_float(PV('RFGun:LaserIntensity1:Read').get(), default=np.nan)
         laser_intensity = float(laserintensity) * 100 * 5
-        PV('RFGun:LaserIntensity1:Write').put(laser_intensity)
-        time.sleep(3)
+        self._set_and_verify(lambda: PV('RFGun:LaserIntensity1:Write').put(laser_intensity), self._pv_readback('RFGun:LaserIntensity1:Read'), laser_intensity, description="RFGun:LaserIntensity1 (intensity change)", tolerance=1e-3)
         return self
 
     def reset_intensity(self):
         new_laser_intensity = self.nominal_laser_intensity
         print(f'Resetting laser intensity to {new_laser_intensity}...')
-        laser_intensity = new_laser_intensity * 100 * 5  # Korysko dixit: 100 for percent, 5 convesion factor
-        PV('RFGun:LaserIntensity1:Write').put(laser_intensity)
-        time.sleep(3)
+        laser_intensity = new_laser_intensity * 100 * 5 # Korysko dixit: 100 for percent, 5 convesion factor
+        self._set_and_verify(lambda: PV('RFGun:LaserIntensity1:Write').put(laser_intensity), self._pv_readback('RFGun:LaserIntensity1:Read'), laser_intensity, description="RFGun:LaserIntensity1 (intensity reset)", tolerance=1e-3)
         return self
+
+    def get_beam_settings(self):
+        settings = {"energy": {}, "intensity": {}}
+        for name, pv_name in (("ramp_control", "RAMP:CONTROL_ON_SW"), ("ramp_pl4", "RAMP:PL4:ONOFF_SW")):
+            settings["energy"][name] = float(PV(pv_name).get())
+            settings["intensity"]["laser_intensity1"] = float(PV('RFGun:LaserIntensity1:Read').get())
+        return settings
+
+    def restore_beam_settings(self, settings):
+        settings = settings or {}
+        energy = settings.get("energy", {})
+        for name, pv_name in (("ramp_control", "RAMP:CONTROL_ON_SW"), ("ramp_pl4", "RAMP:PL4:ONOFF_SW")):
+            if name in energy:
+                target = float(energy[name])
+                PV(pv_name).put(target)
+                self._wait_for_pv_readback(pv_name, target)
+        intensity = settings.get("intensity", {}).get("laser_intensity1")
+        if intensity is not None:
+            target = float(intensity)
+            PV('RFGun:LaserIntensity1:Write').put(target)
+            self._wait_for_pv_readback('RFGun:LaserIntensity1:Read', target)
+        return True
 
     def get_sequence(self):
         return self.sequence
 
     def get_hcorrectors_names(self):
-        return [string for string in self.corrs if
-                (string.lower().startswith('zh')) or (string.lower().startswith('zx'))]
+        return [string for string in self.corrs if (string.lower().startswith('zh')) or (string.lower().startswith('zx'))]
 
     def get_vcorrectors_names(self):
         return [string for string in self.corrs if string.lower().startswith('zv')]
@@ -822,7 +915,7 @@ class InterfaceATF2_Ext(AbstractMachineInterface):
                 name_to_index[alias] = name_to_index[canonical]
         return [name_to_index.get(name, np.nan) for name in names]
 
-    def get_target_dispersion(self, names=None):  # for DR too
+    def get_target_dispersion(self, names=None): # for DR too
         if names is None:
             names = self.bpms
         if isinstance(names, str):
@@ -1042,6 +1135,7 @@ class InterfaceATF2_Ext(AbstractMachineInterface):
             pv_des.put(target)
             self._wait_for_magnet_readback(corrector, target)
 
+
     '''
     METHODS FROM SATO-SAN'S REPO:
     '''
@@ -1100,12 +1194,11 @@ class InterfaceATF2_Ext(AbstractMachineInterface):
         for qmag, current in zip(names, currents):
             canonical = self.qmag_alias_to_canonical.get(qmag, qmag)
             pv_des = PV(f'{canonical}:currentWrite')
-            curr_val = pv_des.get()
-            pv_des.put(curr_val + current)
-        time.sleep(1)
+            target = self.make_safe_float(pv_des.get(), default=np.nan) + float(current)
+            pv_des.put(target)
+            self._wait_for_magnet_readback(canonical, target)
 
-    def apply_qmag_xyroll(self, names, x_um, y_um, roll_m, wait=True, max_attempts=5, attempt_timeout=30.0,
-                          settle_dt=0.5, tol_um=15.0):
+    def apply_qmag_xyroll(self, names, x_um, y_um, roll_m, wait=True, max_attempts=5, attempt_timeout=30.0, settle_dt=0.5, tol_um=15.0):
         if type(names) == str:
             names = [names]
 
@@ -1291,6 +1384,7 @@ class InterfaceATF2_Ext(AbstractMachineInterface):
                 "k1": float(q.get("iact", [np.nan])[idx]),
             }
         return out
+
 
     def _normalize_scan_mode_label(self, scan_mode_label):
         text = str(scan_mode_label or "30").strip()
@@ -1500,8 +1594,7 @@ class InterfaceATF2_Ext(AbstractMachineInterface):
             "zscan_base_values": {str(knob): float(val) for knob, val in zscan_base_values.items()},
         }
 
-    def restore_knob_origin(self, origin_state, *, pos_tol=15.0, pos_timeout=30.0, current_tol=0.05,
-                            current_timeout=15.0, poll=0.05, settle_dt=0.5, use_trim=True, scan_mode_label=None):
+    def restore_knob_origin(self, origin_state, *, pos_tol=15.0, pos_timeout=30.0, current_tol=0.05, current_timeout=15.0, poll=0.05, settle_dt=0.5, use_trim=True, scan_mode_label=None):
         if not isinstance(origin_state, dict):
             raise ValueError("origin_state must be a dict")
 
@@ -1781,8 +1874,7 @@ class InterfaceATF2_Ext(AbstractMachineInterface):
                 settle_dt=settle_dt,
             )
 
-    def _move_zscan_knob_absolute(self, knob_name: str, target_value: float, *, scan_mode_label="30", timeout=30.0,
-                                  poll=0.05, settle_dt=0.05, busy_seen_grace=0.2):
+    def _move_zscan_knob_absolute(self, knob_name: str, target_value: float, *, scan_mode_label="30", timeout=30.0, poll=0.05, settle_dt=0.05, busy_seen_grace=0.2):
         key = str(knob_name)
         if key != self.zscan_knob_name:
             raise KeyError(f"Unknown Z scan knob: {knob_name}")
@@ -1840,8 +1932,7 @@ class InterfaceATF2_Ext(AbstractMachineInterface):
             "ict_average": float(save_ict_average),
         }
 
-    def get_ipbsm_full(self, timeout=300, file_wait=330.0, poll=0.1, start_return_timeout=5.0,
-                       start_to_finish_wait=1.0):
+    def get_ipbsm_full(self, timeout=300, file_wait=330.0, poll=0.1, start_return_timeout=5.0, start_to_finish_wait=1.0):
         with self._ipbsm_lock:
             try:
                 prev_mtime = os.path.getmtime(self.datafile)

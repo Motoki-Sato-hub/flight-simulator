@@ -1,10 +1,11 @@
 import sys, os, re, matplotlib
 from datetime import datetime
+from zoneinfo import ZoneInfo
 import numpy as np
 
 try:
     from PyQt6 import uic
-    from PyQt6.QtCore import Qt, QProcess, QProcessEnvironment
+    from PyQt6.QtCore import Qt, QProcess, QProcessEnvironment, QTimer, QEvent
     from PyQt6.QtWidgets import (QGroupBox, QApplication, QRadioButton, QSizePolicy, QMainWindow, QFileDialog,
                                  QListWidget, QListWidgetItem, QMessageBox, QProgressDialog, QVBoxLayout, QPushButton,
                                  QDialog, QLabel, QStyledItemDelegate, QWidget, QHBoxLayout)
@@ -13,7 +14,7 @@ try:
     pyqt_version = 6
 except ImportError:
     from PyQt5 import uic
-    from PyQt5.QtCore import Qt, QProcess, QProcessEnvironment
+    from PyQt5.QtCore import Qt, QProcess, QProcessEnvironment, QTimer, QEvent
     from PyQt5.QtWidgets import (QGroupBox, QApplication, QRadioButton, QSizePolicy, QMainWindow, QFileDialog,
                                  QListWidget, QListWidgetItem, QMessageBox, QProgressDialog, QVBoxLayout, QPushButton,
                                  QDialog, QLabel, QStyledItemDelegate, QWidget, QHBoxLayout)
@@ -25,34 +26,14 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 from Backend.LogConsole import LogConsole
 from Backend.BBA_helpers.TestOrbits_BBA import TestOrbits
-from Backend.BBA_helpers.RMS_Plots_BBA import RMS_Plots
 from Backend.SaveOrLoad import SaveOrLoad
-from Backend.BBA_helpers.Sextupole_Restoration_Logic import Sextupole_Restoration_Logic
-from Backend.BBA_helpers.QM_mode_helpers import QM_mode_helpers
-from Backend.ResponseMatrix_DFS_WFS import ResponseMatrix_DFS_WFS
+from Backend.ResponseMatrix_DFS_WFS import ResponseMatrix_DFS_WFS, AdaptiveResponseMatrix
 import matplotlib.pyplot as plt
-from enum import Enum
-from dataclasses import dataclass
 from Backend.BBA_helpers.BPM_weights import BPM_weights
+from Backend.ActuatorMode import ActuatorMode
 from traceback import print_exception
 from Interfaces.interface_setup import INTERFACE_SETUP
 from Knobs.jitter_subtraction import (apply_jitter_subtraction, explain_reference_selection, fit_jitter_model)
-
-
-class ActuatorMode(Enum):
-    Kicker = "Correctors"  # Kicker"
-    QM = "Quadrupole movers"  # "QM"
-
-
-@dataclass
-class QmResponseMatrices:
-    qcorrs: list
-    r_xx: np.ndarray
-    r_xy: np.ndarray
-    r_yx: np.ndarray
-    r_yy: np.ndarray
-    t_xx: np.ndarray
-    t_yy: np.ndarray
 
 
 class PlotPopup(QMainWindow):
@@ -100,7 +81,7 @@ class BpmWeightsDelegate(QStyledItemDelegate):
             painter.restore()
 
 
-class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS, Sextupole_Restoration_Logic, QM_mode_helpers):
+class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS):
     def __init__(self, interface, dir_name, nominal_state=None, start_state=None):
         super().__init__()
         self.cwd = os.getcwd()
@@ -113,16 +94,20 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS, Sextupole_Rest
         self.measurement_start_state = None
         self._cancel = False
         self._number_re = re.compile(r"[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?")
-        # self.initial_state=interface.get_state() # initial, for restoring
-        # self.state=interface.get_state() # for latter use
         self.reset_reference_orbit = False
         ui_path = os.path.join(os.path.dirname(__file__), "UI files/BBA_GUI.ui")
         uic.loadUi(ui_path, self)
+        self._clock_zone_name = self._get_clock_zone()
+        self._setup_machine_clock()
         self._load_logo()
         self.bpms_list.setItemDelegate(BpmWeightsDelegate(self.bpms_list))
+        self._bpm_selection_before_click = []
+        self._bpm_weights_double_click = False
+        self.bpms_list.viewport().installEventFilter(self)
         self._data_dirs = {"traj": None, "dfs": None, "wfs": None}
         self._hist_orbit, self._hist_disp, self._hist_wake = [], [], []
         self._hist_orbit_x, self._hist_orbit_y = [], []
+        self._hist_transmission = []
         self._hist_disp_x, self._hist_disp_y = [], []
         self._hist_wake_x, self._hist_wake_y = [], []
         self._hist_orbit_x_err, self._hist_orbit_y_err, self._hist_orbit_err = [], [], []
@@ -132,9 +117,6 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS, Sextupole_Rest
         self.log_console = None
         self.show_response_matrix = None
         self.test_orbits = None
-        self.rms_plots = None
-        self.sextupole_restoration_popup = None
-        self.sextupole_restoration_history = []
         self.traj_popup, self.disp_popup, self.wake_popup = None, None, None
         self._setup_canvases()
         self._plot_double_clicks()
@@ -164,23 +146,49 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS, Sextupole_Rest
         self.jitter_model = None
         self.subtract_jitter_checkbox.setChecked(False)
         self.actuator_mode = ActuatorMode.Kicker
-        self._setup_actuator_mode_combo()
+        self._setup_corrector_controls()
+        self._setup_beam_change_controls()
+        self.restore_machine_status_button.clicked.connect(self._pick_and_load_machine_status_file)
+        self.initial_charge_value = None
+        self.orbit_at_first_start_click_x = None
+        self.orbit_at_first_start_click_y = None
 
-    def _setup_actuator_mode_combo(self):
-        self.actuator_mode_combo.blockSignals(True)
-        self.actuator_mode_combo.setCurrentText(self.actuator_mode.value)
-        self.actuator_mode_combo.blockSignals(False)
+    def _save_machine_status(self):
+        saved_at = self._clock_now()
+        time_str = saved_at.strftime("%y%m%d%H%M%S")
+        default_dir = os.path.expanduser(os.path.expandvars("~/CERN-Flight_Simulator-Data/"))
+        self._session_dir = os.path.join(default_dir, f"BBA_{self.interface.get_name()}{time_str}_session_settings")
+        os.makedirs(self._session_dir, exist_ok=True)
+        machine_state = self.interface.get_state()
+        machine_state.timestamp = saved_at
+        machine_state.save(filename=os.path.join(self._session_dir, "machine_status.pkl"))
+        self.session_database_3.setText(self._session_dir)
+        return machine_state
 
-        self.actuator_mode_combo.currentTextChanged.connect(self._on_actuator_mode_changed)
+    def _get_clock_zone(self):
+        interface_defaults = self._get_interface_initial_settings() or {}
+        timezone = interface_defaults.get("clock_timezone", "Europe/Zurich")
+        return timezone
+
+    def _clock_now(self):
+        return datetime.now(ZoneInfo(self._clock_zone_name))
+
+    def _setup_machine_clock(self):
+        self._clock_timer = QTimer(self)
+        self._clock_timer.setInterval(250)
+        self._clock_timer.timeout.connect(self._update_machine_clock)
+        self._update_machine_clock()
+        self._clock_timer.start()
+
+    def _update_machine_clock(self):
+        now = self._clock_now()
+        self.machine_clock_label.setText(f"{now:%Y-%m-%d %H:%M:%S} {now.tzname()}")
+
+    def _setup_corrector_controls(self):
+        self.groupBox_9.setVisible(False)
+        self.actuator_mode_label.setVisible(False)
+        self.actuator_mode_combo.setVisible(False)
         self.pushButton_11.clicked.connect(self.load_session_settings)
-        self.sextupole_restoration_button.clicked.connect(self._show_sextupole_restoration_popup)
-        if hasattr(self.interface, "get_quadrupoles"):
-            try:
-                self.qm_corrs = self.interface.get_quadrupole_movers_names()
-            except Exception:
-                self.qm_corrs = []
-        else:
-            self.qm_corrs = []
         self.setWindowTitle("BBA GUI")
         self.lineEdit.setText("1")
         self.lineEdit_2.setText("10")
@@ -189,15 +197,14 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS, Sextupole_Rest
         self.lineEdit_5.setText("10")
         self.lineEdit_6.setText("0.4")
         self.lineEdit_beta.setText("0")
+        self.transmission_value.setText("0.65")
+        self._setup_nsamples_control()
         self.compute_response_matrix_button.clicked.connect(self._display_response_matrix)
         self.pushButton_reset_ref_orbit.clicked.connect(self._reset_reference_orbit)
-        self.show_orbit_RMS_button.clicked.connect(self._show_orbit_RMS_plots)
         self.reset_ref_orb = False
-        self.bpms_list.itemDoubleClicked.connect(self._edit_bpm_weights)
         correctors = self.interface.get_correctors()
         correctors_list = correctors['names']
-        self.hcorrector_names = set(map(str,
-                                        self.interface.get_hcorrectors_names() or []))  # takes correctors names, if None, then use an empty list, makes everything a string and saves as a set without the duplicates
+        self.hcorrector_names = set(map(str, self.interface.get_hcorrectors_names() or []))  # takes correctors names, if None, then use an empty list, makes everything a string and saves as a set without the duplicates
         self.vcorrector_names = set(map(str, self.interface.get_vcorrectors_names() or []))
         units_settings, sysid_kick, bpm_unit, corrs_unit = self._get_interface_units()
         self.sysid_kick = sysid_kick
@@ -218,65 +225,22 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS, Sextupole_Rest
 
             max_curr_h = 1.15 * np.max(np.abs(clean_array(np.array(correctors['bdes'])[hcorr_indexes])))
             max_curr_v = 1.15 * np.max(np.abs(clean_array(np.array(correctors['bdes'])[vcorr_indexes])))
-
+            if "bba_max_h_strength" in units_settings: max_curr_h = units_settings["bba_max_h_strength"]
+            if "bba_max_v_strength" in units_settings: max_curr_v = units_settings["bba_max_v_strength"]
         self.max_horizontal_current_spinbox.setValue(max_curr_h)
         self.max_horizontal_current_spinbox.setSingleStep(0.01)
         self.max_vertical_current_spinbox.setValue(max_curr_v)
         self.max_vertical_current_spinbox.setSingleStep(0.01)
-        self._setup_qm_controls()
-        self._refresh_corrector_list()
-        self._update_qm_widgets_visibility()
-        self._refresh_specific_bpm_candidates()
+
         self._refresh_metric_plots_for_mode()
-        is_qm = self.actuator_mode == ActuatorMode.QM
-        if is_qm:
-            self.radio_buttons[0].setChecked(True)
-            self.groupBox_6.setTitle("DFS not used in QM mode")
-            self.groupBox_7.setTitle("WFS not used in QM mode")
 
-        self.radio_buttons[1].setEnabled(not is_qm)
-        self.radio_buttons[2].setEnabled(not is_qm)
+    def _setup_nsamples_control(self):
+        self.nsamples_input.setText(str(max(1, int(self.interface.nsamples))))
+        self.nsamples_input.textChanged.connect(self._set_interface_nsamples)
 
-        for widget in (self.dfs_response_3, self.pushButton_9, self.mode_dispersion, self.wfs_response_3,
-                       self.pushButton_10, self.mode_wakefield):
-            widget.setEnabled(not is_qm)
-
-    def _on_actuator_mode_changed(self, text):
-        if text not in [mode.value for mode in ActuatorMode]:
-            return
-        self.actuator_mode = ActuatorMode(text)
-        if not hasattr(self, "specific_bpm_row"):
-            return
-        self.actuator_mode = ActuatorMode(text)
-        self._refresh_corrector_list()
-        self._update_qm_widgets_visibility()
-        self._refresh_specific_bpm_candidates()
-        self._refresh_metric_plots_for_mode()
-        is_qm = self.actuator_mode == ActuatorMode.QM
-        if is_qm:
-            self.radio_buttons[0].setChecked(True)
-        self.radio_buttons[1].setEnabled(not is_qm)
-        self.radio_buttons[2].setEnabled(not is_qm)
-
-        for widget in (self.dfs_response_3, self.pushButton_9, self.mode_dispersion,
-                       self.wfs_response_3, self.pushButton_10, self.mode_wakefield):
-            widget.setEnabled(not is_qm)
-
-    def _refresh_corrector_list(self):
-        self.correctors_list.clear()
-        if self.actuator_mode == ActuatorMode.QM:
-            items = self.qm_corrs
-            self.groupBox_5.setTitle("Quadrupoles")
-        else:
-            items = self.corrs
-            self.groupBox_5.setTitle("Correctors")
-        self.correctors_list.insertItems(0, [str(item) for item in items])
-
-        for gb in (self.groupBox_5, self.groupBox_8):
-            t = gb.title()
-            gb.setTitle("")
-            gb.setTitle(t)
-        self.horizontalLayout_corrbpms_tables.activate()
+    def _set_interface_nsamples(self, value):
+        self.interface.nsamples = max(1, int(value))
+        self.nsamples_input.setStyleSheet("")
 
     def _load_logo(self):
         self.logo_label.setText("")
@@ -409,14 +373,105 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS, Sextupole_Rest
 
         return units_settings, sysid_kick, bpm_unit, corrs_unit
 
+    def _setup_beam_change_controls(self):
+        beam_change = (self._get_interface_initial_settings() or {}).get("beam_change", {})
+        self._beam_change_fields = []
+        self.beam_change_group.setVisible(bool(beam_change))
+
+        controls = {
+            "energy": (
+                self.energy_change_label,
+                self.energy_nominal_label,
+                self.energy_nominal_input,
+                self.energy_test_label,
+                self.energy_test_input,
+                self.energy_change_tooltip,
+            ),
+            "intensity": (
+                self.intensity_change_label,
+                self.intensity_nominal_label,
+                self.intensity_nominal_input,
+                self.intensity_test_label,
+                self.intensity_test_input,
+                self.intensity_change_tooltip,
+            ),
+        }
+        for kind, widgets in controls.items():
+            title, nominal_label, nominal_input, test_label, test_input, tooltip = widgets
+            settings = beam_change.get(kind)
+            title.setVisible(settings is not None)
+            tooltip.setVisible(settings is not None)
+            if settings is None:
+                for widget in (nominal_label, nominal_input, test_label, test_input):
+                    widget.setVisible(False)
+                continue
+            title.setText(settings["label"])
+            tooltip.setToolTip(settings["tooltip"])
+            for slot, label, input_widget in (
+                    ("nominal", nominal_label, nominal_input),
+                    ("test", test_label, test_input),
+            ):
+                field = settings.get(slot)
+                label.setVisible(field is not None)
+                input_widget.setVisible(field is not None)
+                if field is None:
+                    continue
+                label.setText(field["label"])
+                value = getattr(self.interface, field["attribute"], field.get("default", ""))
+                input_widget.setText("" if value is None else str(value))
+                input_widget.setPlaceholderText(field.get("placeholder", ""))
+                self._beam_change_fields.append((input_widget, field))
+
+    def _apply_beam_change_controls(self):
+        self._beam_change_values = {}
+        for input_widget, field in self._beam_change_fields:
+            text = input_widget.text().strip()
+            if not text and field.get("allow_empty", False):
+                setattr(self.interface, field["attribute"], None)
+                self._beam_change_values[field["attribute"]] = None
+                input_widget.setStyleSheet("")
+                continue
+            try:
+                value = float(text)
+            except ValueError:
+                input_widget.setStyleSheet("QLineEdit { border: 1px solid #c62828; }")
+                QMessageBox.warning(self, "Invalid beam-change setting", f"{field['label']} must be a number.")
+                return False
+            input_widget.setStyleSheet("")
+            setattr(self.interface, field["attribute"], value)
+            self._beam_change_values[field["attribute"]] = value
+        return True
+
+    def _load_beam_change_values(self, values):
+        for input_widget, field in self._beam_change_fields:
+            attribute = field["attribute"]
+            if attribute not in values:
+                continue
+            value = values[attribute]
+            input_widget.setText("" if value is None else str(value))
+        return self._apply_beam_change_controls()
+
     def _restore_initial_settings(self):
         self.log("Restoring initial settings...")
         self._cancel = True
         self._running = False
-        self.interface.reset_energy()
-        self.interface.reset_intensity()
-        self.interface.restore_correctors_state(self.restore_state)
-        self.interface.restore_sextupoles_state(self.restore_state)
+        w1, w2, w3, rcond, iters, gain, beta, transmission_threshold= self._read_params()
+        try:
+            if w2 > 0:
+                self.interface.reset_energy()
+            if w3 > 0:
+                self.interface.reset_intensity()
+        except Exception:
+            self.log(f"The machine wasn't restored to its nominal state.")
+            QMessageBox.critical(self, "Restore error",
+                                 f"Could not confirm the machine returned to its nominal energy/intensity.")
+        if self.interface.restore_correctors_state(self.restore_state) is False:
+            self.log("Warning: not every corrector was confirmed back at its saved current.")
+            QMessageBox.warning(
+                self, "Restore initial settings",
+                "Some correctors were not confirmed back at their saved current within the "
+                "readback tolerance. Check them on the machine before the next correction.",
+            )
         self.reset_ref_orb = True
         self._hist_abs_rms_x.clear(), self._hist_abs_rms_y.clear(), self._hist_abs_rms_xy.clear()
         self._clear_graphs()
@@ -427,6 +482,25 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS, Sextupole_Rest
 
     def _is_v_corrector(self, s):
         return str(s) in self.vcorrector_names
+
+    def eventFilter(self, watched, event):
+        if watched is self.bpms_list.viewport():
+            if event.type() == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
+                self._bpm_weights_double_click = False
+                self._bpm_selection_before_click = self.bpms_list.selectedItems()
+            elif event.type() == QEvent.Type.MouseButtonDblClick and event.button() == Qt.MouseButton.LeftButton:
+                bpm = self.bpms_list.itemAt(event.pos())
+                if bpm is not None:
+                    self._bpm_weights_double_click = True
+                    for i in range(self.bpms_list.count()):
+                        item = self.bpms_list.item(i)
+                        item.setSelected(item in self._bpm_selection_before_click)
+                    self._edit_bpm_weights(bpm)
+                    return True
+            elif event.type() == QEvent.Type.MouseButtonRelease and self._bpm_weights_double_click:
+                self._bpm_weights_double_click = False
+                return True
+        return super().eventFilter(watched, event)
 
     def _edit_bpm_weights(self, bpm):
         bpm_name = bpm.data(Qt.ItemDataRole.UserRole) or (bpm.text() or "")
@@ -445,33 +519,13 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS, Sextupole_Rest
         print("Starting button clicked...")
         self.log("Starting button clicked...")
         if not self._running:
+            if not self._apply_beam_change_controls():
+                return
+            saved_state = self._save_machine_status()
             self._running = True
             self._step = True
-            saved_state = self.interface.get_state()
-            sextupoles = saved_state.get_sextupoles()
-            sextupoles_to_disable = len(sextupoles["names"]) > 0
             completed = False
-            try:
-                if sextupoles_to_disable:
-                    self._start_correction(machine_state=saved_state)
-
-                    # self.interface.set_sextupoles(sextupoles["names"], np.zeros(len(sextupoles["names"]), dtype=float))
-                    # self.log("Sextupoles disabled before BBA")
-                    # self._start_correction(silent=True)
-                    # golden_state = self.interface.get_state()
-                    # golden_state = self._apply_jitter_subtraction_to_state(golden_state)
-                    # self.log("BBA finished with sextupoles off. Stored this orbit as the post-BBA reference.")
-                    # self.sextupole_restoration_history = self._restore_sextupoles_one_by_one_with_orbit_correction(saved_state, golden_state, orbit_iters=30)
-                    # self._show_sextupole_restoration_popup()
-                    # QMessageBox.information(self, "Correction", "BBA and sextupole restoration finished.")
-                else:
-                    self._start_correction(machine_state=saved_state)
-                completed = True
-            finally:
-                self._running = False
-                if sextupoles_to_disable and not completed:
-                    self.interface.restore_sextupoles_state(saved_state)
-                    self.log("Sextupoles restored after interrupted procedure.")
+            self._start_correction()
         else:
             self._step = True
 
@@ -510,6 +564,9 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS, Sextupole_Rest
             return
         if getattr(self, "_suppress_main_plots", False):
             return
+        if ax is self.traj_ax and getattr(self, "traj_transmission_ax", None) is not None:
+            self.traj_transmission_ax.remove()
+            self.traj_transmission_ax = None
         ax.clear()
 
         def matching_yerr(errors, values):
@@ -526,17 +583,26 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS, Sextupole_Rest
 
         if values_x:
             err_x = matching_yerr(error_x, values_x)
-            ax.errorbar(range(len(values_x)), values_x, yerr=err_x, marker="o", color='red', label="x", capsize=6,
+            ax.errorbar(range(len(values_x)), values_x, yerr=err_x, marker="o", color='blue', label="x", capsize=6,
                         elinewidth=2, capthick=2,
                         markersize=4)  # yerr - height of the error bar on the plot, capsize - size of the top line on the error bar
         if values_y:
             err_y = matching_yerr(error_y, values_y)
-            ax.errorbar(range(len(values_y)), values_y, yerr=err_y, marker="o", color='blue', label="y", capsize=6,
+            ax.errorbar(range(len(values_y)), values_y, yerr=err_y, marker="o", color='red', label="y", capsize=6,
                         elinewidth=2, capthick=2, markersize=4)
         if vals:
             err_all = matching_yerr(error_all, vals)
             ax.errorbar(range(len(vals)), vals, yerr=err_all, linestyle="dashed", color='black', label="combined norm",
                         capsize=6, elinewidth=2, capthick=2, markersize=4)
+        if ax is self.traj_ax and self._hist_transmission:
+            transmission = np.asarray(self._hist_transmission, dtype=float)
+            if np.any(np.isfinite(transmission)):
+                self.traj_transmission_ax = ax.twinx()
+                self.traj_transmission_ax.plot(range(len(transmission)), transmission, "g--", label="Transmission")
+                self.traj_transmission_ax.set_ylabel("Transmission [%]", color="green")
+                self.traj_transmission_ax.set_ylim(bottom=0.0)
+                self.traj_transmission_ax.tick_params(axis="y", colors="green")
+                self.traj_transmission_ax.legend(fontsize=7, loc="lower right")
         if values_x or values_y:
             ax.legend(fontsize=7, loc="upper right")
         if title is not None:
@@ -556,25 +622,12 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS, Sextupole_Rest
         elif ax is self.wake_ax:
             self._refresh_plot_popup("wake")
 
-    def _plot_disabled_panel(self, ax, canvas, title="Not used in QM Mode"):
-        if canvas is None or ax is None:
-            return
-        ax.clear()
-        ax.set_facecolor("#F0F0F0")
-        ax.text(0.5, 0.5, title, transform=ax.transAxes, ha="center", va="center", fontsize=12, color="#777777")
-        ax.set_xticks([])
-        ax.set_yticks([])
-        for spine in ax.spines.values():
-            spine.set_color('#CCCCCC')
-        canvas.draw_idle()
-
     def _get_bpm_weights_text(self, bpm_name):
         wbpm_orb, wbpm_dfs, wbpm_wfs = self.bpm_weights.get(bpm_name, (1.0, 1.0, 1.0))
         return f"[w1 = {wbpm_orb:g}, w2 = {wbpm_dfs:g}, w3 = {wbpm_wfs:g}]"  # general format, removes reduntant zeros at the end etc.
 
     def _update_bpm_weights(self, item):
-        bpm_name = item.data(Qt.ItemDataRole.UserRole) or (
-                    item.text() or "")  # it gives a clean name of the item, even if there is another text (like weights)
+        bpm_name = item.data(Qt.ItemDataRole.UserRole) or (item.text() or "")  # it gives a clean name of the item, even if there is another text (like weights)
         item.setData(BpmWeightsDelegate.WEIGHTS_ROLE, self._get_bpm_weights_text(bpm_name))
         item.setText(bpm_name)
 
@@ -590,8 +643,7 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS, Sextupole_Rest
             self.bpms_list.addItem(item)
 
     def _get_selection(self):
-        corrs_all = self.qm_corrs if self.actuator_mode == ActuatorMode.QM else self.initial_state.get_correctors()[
-            "names"]
+        corrs_all = self.initial_state.get_correctors()["names"]
         bpms_all = self.initial_state.get_bpms()["names"]
 
         selected_corrs = []
@@ -707,13 +759,55 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS, Sextupole_Rest
         iters = geti("lineEdit_5", 10)
         gain = getf("lineEdit_6", 0.4)
         beta = getf("lineEdit_beta", 0.0)
-        return orbit_w, disp_w, wake_w, rcond, iters, gain, beta
+        transmission_threshold = getf("transmission_value", 0.65) * 100
+        return orbit_w, disp_w, wake_w, rcond, iters, gain, beta, transmission_threshold
 
     def _reset_reference_orbit(self):
         self.reset_ref_orb = True
         self.log("Resetting reference orbit")
 
-    def _start_correction(self, silent=False, preserve_plots=False, machine_state=None):
+    def _build_jitter_model_for_correction(self, actuators, bpms):
+        if not self.subtract_jitter_checkbox.isChecked():
+            self.jitter_model = None
+            return None
+
+        sequence = self.interface.get_sequence()
+        refs, reason = explain_reference_selection(bpms, actuators, sequence, min_refs=2)
+
+        if reason:
+            self.log(f"Jitter subtraction disabled: {reason}")
+            self.jitter_model = None
+            return None
+
+        old_nsamples = getattr(self.interface, "nsamples", None)
+        fit_nsamples = 300
+
+        try:
+            if old_nsamples is not None:
+                self.interface.nsamples = fit_nsamples
+            bpms_snapshot = self.interface.get_bpms()
+        finally:
+            if old_nsamples is not None:
+                self.interface.nsamples = old_nsamples
+
+        targets = [str(bpm) for bpm in bpms if str(bpm) not in set(refs)]
+
+        model, fit_reason = fit_jitter_model(bpms_list=[bpms_snapshot], reference_bpms=refs, target_bpms=targets)
+
+        if model is None:
+            self.log(f"Jitter subtraction disabled: {fit_reason}")
+            self.jitter_model = None
+            return None
+
+        self.jitter_model = model
+        self.log(
+            "Jitter subtraction enabled with refs: "
+            + ", ".join(refs)
+            + f"; fitted from {fit_nsamples} fixed-config BPM samples"
+        )
+        return model
+
+    def _start_correction(self, silent=False, preserve_plots=False):
         try:
             plot_snapshot = None
             if preserve_plots:
@@ -741,23 +835,17 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS, Sextupole_Rest
                     "abs_rms_xy": list(self._hist_abs_rms_xy),
                 }
             corrs, bpms = self._get_selection()
-            if machine_state is None:
-                machine_state = self.interface.get_state()
-
-            if self.actuator_mode == ActuatorMode.QM:
-                self._start_qm_correction(silent=silent, preserve_plots=preserve_plots)
-                return
 
             self._build_jitter_model_for_correction(actuators=corrs, bpms=bpms)
             if self.jitter_model is not None:
                 refs = set(self.jitter_model["reference_bpms"])
                 bpms = [bpm for bpm in bpms if bpm not in refs]
-                self.log("Removed jitter reference BPMs from QM correction targets")
+                self.log("Removed jitter reference BPMs from correction targets")
             print("Starting correction...")
             self.log("Starting correction...")
 
             self._cancel = False
-            w1, w2, w3, rcond, iters, gain, beta = self._read_params()
+            w1, w2, w3, rcond, iters, gain, beta, transmission_threshold = self._read_params()
             wgt_orb, wgt_dfs, wgt_wfs = w1, w2, w3
             Cx = [s for s in corrs if self._is_h_corrector(s)]
             Cy = [s for s in corrs if self._is_v_corrector(s)]
@@ -772,6 +860,11 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS, Sextupole_Rest
             Ayy_base = np.array(Ayy, copy=True)
             Axy_base = np.array(Axy, copy=True)
             Ayx_base = np.array(Ayx, copy=True)
+
+            if self.remove_coupling_checkbox.isChecked():
+                Axy_base.fill(0.0)
+                Ayx_base.fill(0.0)
+
             bpms = list(bpms_common)
 
             n = len(bpms)
@@ -796,7 +889,6 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS, Sextupole_Rest
             w_xy_bpms = np.sqrt(W_xy)
 
             self.setWindowTitle("BBA GUI - [Correction running]")
-
             target_disp_x, target_disp_y = self.interface.get_target_dispersion(bpms)
             max_curr_h = self.max_horizontal_current_spinbox.value()  # gauss * m
             max_curr_v = self.max_vertical_current_spinbox.value()  # gauss * m
@@ -812,7 +904,26 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS, Sextupole_Rest
 
             plt.ion()
 
-            for it in range(iters):
+            self.use_adaptive_R = getattr(self, "use_adaptive_R", True)
+            self._adaptive_R = getattr(self, "_adaptive_R", None)
+            self._adaptive_R_prev_kick = None
+            self._adaptive_R_prev_orbit = None
+            adaptive_orbit_only = self.use_adaptive_R and w1 > 0 and w2 == 0 and w3 == 0
+            if not adaptive_orbit_only:
+                self._adaptive_R = None
+            if w2 > 0:
+                self.interface.reset_energy()
+            if w3 > 0:
+                self.interface.reset_intensity()
+
+            samples_dir = os.path.join(self._session_dir, "BBA_states")
+            os.makedirs(samples_dir, exist_ok=True)
+            last_completed_iteration = None
+            prev_Dx = None
+            prev_Dy = None
+            prev_applied_kick = None
+
+            for it in range(iters + 1):
                 if self._cancel:
                     break
                 self._step = False
@@ -822,6 +933,21 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS, Sextupole_Rest
                 self.log("Measuring orbit")
                 state0 = self.interface.get_state()
                 state0 = self._apply_jitter_subtraction_to_state(state0)
+                nominal_file = os.path.join(samples_dir, f"ITER_{it:04d}_nominal.pkl")
+                state0.save(filename=nominal_file)
+                if hasattr(self.interface, "chosen_ict"):
+                    charge = np.asarray(state0.get_icts(self.interface.chosen_ict)["charge"], dtype=float).ravel()
+                    if charge.size and np.isfinite(charge[0]) and charge[0] != 0:
+                        if self.initial_charge_value is None:
+                            self.initial_charge_value = charge[0]
+                        reference = float(self.initial_charge_value)
+                        self._hist_transmission.append(100.0 * charge[0] / reference)
+                        if self._hist_transmission[-1] <= transmission_threshold:
+                            self._stop_correction()
+                            QMessageBox.warning(self, "Transmission below level!",
+                                                "Transmission has reached the threshold. Stoping the correction now, and leaving correctors at current values.")
+                    else:
+                        self._hist_transmission.append(np.nan)
                 if it == 0:
                     self.measurement_start_state = state0
                     screens0 = state0.get_screens()
@@ -836,9 +962,12 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS, Sextupole_Rest
                             print(f"Emitt y for screen {screen_name}: {tw['emitt_y']}")
                         else:
                             pass
-                O0 = state0.get_orbit(bpms)  # because axis=1 is mean from one whole measurement, not for 1 bpm
+                O0 = state0.get_orbit(bpms)
                 O0x = np.asarray(O0['x'], dtype=float).reshape(-1, 1)
                 O0y = np.asarray(O0['y'], dtype=float).reshape(-1, 1)
+                orbit_now = np.concatenate([O0x, O0y]).ravel()
+                if adaptive_orbit_only and self._adaptive_R is not None and self._adaptive_R_prev_kick is not None:
+                    self._adaptive_R.update(self._adaptive_R_prev_kick, orbit_now - self._adaptive_R_prev_orbit)
                 bpms0 = state0.get_bpms(bpms)
                 x0_vals = np.asarray(bpms0['x'], dtype=float)
                 y0_vals = np.asarray(bpms0['y'], dtype=float)
@@ -855,26 +984,30 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS, Sextupole_Rest
                 UNCOMMENT AFTER SANITY CHECKS 
                 '''
 
-                if it==0:
-                    B0x = O0x
-                    B0y = O0y
-
-                # if it == 0:
-                #     B0x = np.asarray(B0x, dtype=float).reshape(-1, 1)
-                #     B0y = np.asarray(B0y, dtype=float).reshape(-1, 1)
-                #     print("||O0x - B0x|| =", np.linalg.norm(O0x - B0x))
-                #     print("||O0y - B0y|| =", np.linalg.norm(O0y - B0y))
-                #     self.log(
-                #         f"Initial orbit error from reference: "
-                #         f"x={np.linalg.norm(O0x - B0x):.6g}, "
-                #         f"y={np.linalg.norm(O0y - B0y):.6g}"
-                #     )
+                if it == 0:
+                    if self.orbit_at_first_start_click_x is None and self.orbit_at_first_start_click_y is None:
+                        B0x = O0x.copy()
+                        B0y = O0y.copy()
+                        self.orbit_at_first_start_click_x = B0x
+                        self.orbit_at_first_start_click_y = B0y
+                    else:
+                        B0x = self.orbit_at_first_start_click_x
+                        B0y = self.orbit_at_first_start_click_y
 
                 if self.reset_ref_orb == True:
                     B0x = O0x.copy()
                     B0y = O0y.copy()
                     self.reset_ref_orb = False
                     self.log("Reference orbit reset to current orbit")
+
+                if w1 > 0 and (O0x.shape != B0x.shape or O0y.shape != B0y.shape):
+                    self.setWindowTitle("BBA GUI")
+                    QMessageBox.warning(
+                        self, "BPM selection changed",
+                        "The number of selected BPMs differs from the saved reference orbit.\n"
+                        "Restore the previous BPM selection or click Reset reference orbit, then start again.",
+                    )
+                    return
 
                 # dfs
                 if w2 > 0:
@@ -883,6 +1016,8 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS, Sextupole_Rest
                     dP_P = self.interface.change_energy()
                     state1 = self.interface.get_state()
                     state1 = self._apply_jitter_subtraction_to_state(state1)
+                    energy_file = os.path.join(samples_dir, f"ITER_{it:04d}_energy.pkl")
+                    state1.save(filename=energy_file)
                     self.interface.reset_energy()
                     O1 = state1.get_orbit(bpms)
                     O1x = np.asarray(O1['x'], dtype=float).reshape(-1, 1)
@@ -890,10 +1025,15 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS, Sextupole_Rest
                     bpms1 = state1.get_bpms(bpms)
                     x1_vals = np.asarray(bpms1["x"], dtype=float)
                     y1_vals = np.asarray(bpms1["y"], dtype=float)
+                    err_dx = np.sqrt(np.square(np.asarray(O0["stdx"], dtype=float)) / x0_vals.shape[0] + np.square(
+                        np.asarray(O1["stdx"], dtype=float)) / x1_vals.shape[0])
+                    err_dy = np.sqrt(np.square(np.asarray(O0["stdy"], dtype=float)) / y0_vals.shape[0] + np.square(
+                        np.asarray(O1["stdy"], dtype=float)) / y1_vals.shape[0])
                     Dx = np.array([1e3 * dx * dP_P for dx in target_disp_x]).reshape(-1, 1)
                     Dy = np.array([1e3 * dy * dP_P for dy in target_disp_y]).reshape(-1, 1)
                     plt.clf()
-                    plt.plot(Dx, label="target dispersion")
+                    plt.plot(Dx, '--', color='blue', label="target dispersion x")
+                    plt.plot(Dy, '--', color='orange', label="target dispersion y")
                 else:
                     O1x = O1y = None
                     Dx = Dy = None
@@ -905,6 +1045,8 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS, Sextupole_Rest
                     self.interface.change_intensity()
                     state2 = self.interface.get_state()
                     state2 = self._apply_jitter_subtraction_to_state(state2)
+                    intensity_file = os.path.join(samples_dir, f"ITER_{it:04d}_intensity.pkl")
+                    state2.save(filename=intensity_file)
                     self.interface.reset_intensity()
                     O2 = state2.get_orbit(bpms)
                     O2x = np.asarray(O2['x'], dtype=float).reshape(-1, 1)
@@ -922,6 +1064,8 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS, Sextupole_Rest
                     "O0y": np.asarray(O0y).reshape(-1),
                     "O1y": None if O1y is None else np.asarray(O1y).reshape(-1),
                     "O2y": None if O2y is None else np.asarray(O2y).reshape(-1),
+                    "dfs_err_x": None if w2 <= 0 else np.asarray(err_dx).reshape(-1),
+                    "dfs_err_y": None if w2 <= 0 else np.asarray(err_dy).reshape(-1),
                 }
                 if not hasattr(self, "rms_orbits_data") or self.rms_orbits_data is None:
                     self.rms_orbits_data = {}
@@ -952,15 +1096,17 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS, Sextupole_Rest
                 if w1 > 0:
                     Bx.append(wgt_orb * (O0x - B0x))
                     By.append(wgt_orb * (O0y - B0y))
-
                 if w2 > 0 and O1x is not None:
-                    plt.plot((O1x - O0x), label="measured")
+                    plt.errorbar(range(len(O1x)), (O1x - O0x).ravel(), yerr=err_dx,
+                                 color='blue', label="measured x", capsize=3)
+                    plt.errorbar(range(len(O1y)), (O1y - O0y).ravel(), yerr=err_dy,
+                                 color='orange', label="measured y", capsize=3)
                     plt.xlabel("BPM index")
                     plt.ylabel(f"Orbit difference [{self.bpm_unit}]")
-                    plt.title("DFS: measured orbit difference vs target dispersion")
+                    plt.title(f"DFS: measured orbit difference vs target dispersion (x, y): iteration {it + 1}/{iters}")
                     plt.legend()
                     plt.grid(True, alpha=0.3)
-                    plt.show()
+                    dfs_plot_ax = plt.gca()  # get current axis, don't mistake for other plot
                     Bx.append(wgt_dfs * ((O1x - O0x) - Dx))
                     By.append(wgt_dfs * ((O1y - O0y) - Dy))
 
@@ -1010,6 +1156,12 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS, Sextupole_Rest
                 A = np.block([[Axx_it, Axy_it],
                               [Ayx_it, Ayy_it]])
 
+                if adaptive_orbit_only:
+                    if self._adaptive_R is None or self._adaptive_R.R0.shape != A.shape:
+                        self._adaptive_R = AdaptiveResponseMatrix(A)  # first use, or corrector/BPM selection changed
+                    else:
+                        A = self._adaptive_R.R
+
                 B = np.vstack([Bx, By])
 
                 A[np.isnan(A)] = 0
@@ -1043,9 +1195,21 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS, Sextupole_Rest
                 current_corrs = self.interface.get_correctors(selected_correctors)
                 returned_names = list(current_corrs["names"])
                 returned_bdes = np.asarray(current_corrs["bdes"], dtype=float).ravel()
+                returned_bact = np.asarray(current_corrs["bact"], dtype=float).ravel()
 
                 bdes_map = {name: val for name, val in zip(returned_names, returned_bdes)}
+                bact_map = {name: val for name, val in zip(returned_names, returned_bact)}
                 current_bdes = np.array([bdes_map[name] for name in selected_correctors], dtype=float)
+                current_bact = np.array([bact_map[name] for name in selected_correctors], dtype=float)
+                readback_tolerance = 0.05
+                if not np.allclose(current_bact, current_bdes, rtol=0.0, atol=readback_tolerance):
+                    failed = [
+                        f"{name} (bdes={target:.6g}, bact={actual:.6g})"
+                        for name, target, actual in zip(selected_correctors, current_bdes, current_bact)
+                        if abs(actual - target) > readback_tolerance
+                    ]
+                    raise RuntimeError(
+                        "Corrector readback differs from its setpoint before correction: " + ", ".join(failed))
 
                 max_vals_x = np.full(delta_x.shape, max_curr_h, dtype=float)
                 max_vals_y = np.full(delta_y.shape, max_curr_v, dtype=float)
@@ -1053,9 +1217,28 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS, Sextupole_Rest
 
                 new_bdes = current_bdes + delta_vals
                 new_bdes = clamp(new_bdes, max_vals)
-                self.interface.set_correctors(selected_correctors, new_bdes)
+                for attempt in range(1, 4):
+                    set_ok = self.interface.set_correctors(selected_correctors, new_bdes)
+                    after_corrs = self.interface.get_correctors(selected_correctors)
+                    after_names = list(after_corrs["names"])
+                    after_bact_map = {
+                        name: val for name, val in
+                        zip(after_names, np.asarray(after_corrs["bact"], dtype=float).ravel())
+                    }
+                    after_bact = np.array([after_bact_map[name] for name in selected_correctors], dtype=float)
+                    if set_ok is not False and np.allclose(after_bact, new_bdes, rtol=0.0, atol=readback_tolerance):
+                        break
+                    self.log(f"Corrector readback mismatch after BBA kick (attempt {attempt}/3)")
+                else:
+                    failed = [
+                        f"{name} (target={target:.6g}, bact={actual:.6g})"
+                        for name, target, actual in zip(selected_correctors, new_bdes, after_bact)
+                        if abs(actual - target) > readback_tolerance
+                    ]
+                    raise RuntimeError(
+                        "BBA stopped: correctors did not reach their requested currents (the correction is not reliable): " + ", ".join(
+                            failed))
 
-                after_corrs = self.interface.get_correctors(selected_correctors)
                 after_names = list(after_corrs["names"])
                 after_vals = np.asarray(after_corrs["bdes"], dtype=float).ravel()
                 after_map = {name: val for name, val in zip(after_names, after_vals)}
@@ -1065,7 +1248,35 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS, Sextupole_Rest
                 print("current_bdes =", current_bdes)
                 print("new_bdes =", new_bdes)
                 print("after_bdes =", after_bdes)
-                print("applied_delta =", after_bdes - current_bdes)
+                applied_delta = after_bdes - current_bdes
+                print("applied_delta =", applied_delta)
+
+                if w2 > 0 and O1x is not None and O1y is not None and prev_Dx is not None and prev_Dy is not None:
+                    dfs_start = n if w1 > 0 else 0
+                    dfs_rows = slice(dfs_start, dfs_start + n)  # slice of an array start:end
+                    applied_x = applied_delta[:nh]
+                    applied_y = applied_delta[nh:]
+                    dfs_prediction_x = (
+                                prev_Dx + (Axx_it[dfs_rows, :] @ applied_x + Axy_it[dfs_rows, :] @ applied_y) / wgt_dfs)
+                    dfs_prediction_y = (
+                                prev_Dy + (Ayx_it[dfs_rows, :] @ applied_x + Ayy_it[dfs_rows, :] @ applied_y) / wgt_dfs)
+                    dfs_plot_ax.plot(range(n), dfs_prediction_x, color="blue", linestyle="--", label="R prediction x")
+                    dfs_plot_ax.plot(range(n), dfs_prediction_y, color="orange", linestyle="--", label="R prediction y")
+                    dfs_plot_ax.legend()
+                    dfs_plot_ax.figure.canvas.draw_idle()
+                if adaptive_orbit_only:
+                    self._adaptive_R_prev_kick = applied_delta.copy()
+                    self._adaptive_R_prev_orbit = orbit_now
+
+                kicks_path = os.path.join(self._session_dir, "kicks.txt")
+                write_header = not os.path.exists(kicks_path)
+                with open(kicks_path, "a") as file:
+                    if write_header:
+                        file.write("time\titeration\tcorrector\tbdes_before\tapplied_kick\tbdes_after\n")
+                    time = datetime.now().isoformat(timespec="seconds")
+                    for corrector, before, kick, after in zip(selected_correctors, current_bdes, applied_delta,
+                                                              after_bdes):
+                        file.write(f"{time}\t{it + 1}\t{corrector}\t{before:.12g}\t{kick:.12g}\t{after:.12g}\n")
                 # new bdes and after bdes should be the same
 
                 vals = new_bdes - current_bdes
@@ -1085,6 +1296,8 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS, Sextupole_Rest
                 if w2 > 0 and O1x is not None and O1y is not None:
                     dx_disp = x1_vals - x0_vals
                     dy_disp = y1_vals - y0_vals
+                    prev_Dx = (O1x - O0x).ravel()
+                    prev_Dy = (O1y - O0y).ravel()
                     mean_disp_x, mean_disp_y, err_disp_x, err_disp_y, mean_disp_all, err_disp_all = self._calc_error(
                         dx_disp, dy_disp, ref_x=np.zeros(dx_disp.shape[1]), ref_y=np.zeros(dy_disp.shape[1]),
                         disp_x=Dx.ravel(), disp_y=Dy.ravel())
@@ -1117,11 +1330,21 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS, Sextupole_Rest
                                   values_y=self._hist_wake_y, vals=self._hist_wake, error_x=self._hist_wake_x_err,
                                   error_y=self._hist_wake_y_err, error_all=self._hist_wake_err, title=None)
                 QApplication.processEvents()
+                last_completed_iteration = it
 
             self.setWindowTitle("BBA GUI")
             if not silent:
                 QMessageBox.information(self, "Correction", "Correction finished.")
             final_state = self.interface.get_state()
+            final_machine_status_file = os.path.join(self._session_dir, "machine_status_after_correction.pkl")
+            final_state.save(filename=final_machine_status_file)
+            self.log(f"Saved machine status after correction: {os.path.basename(final_machine_status_file)}")
+            final_state = self._apply_jitter_subtraction_to_state(final_state)
+            if last_completed_iteration is not None:
+                final_nominal_file = os.path.join(
+                    samples_dir, f"ITER_{last_completed_iteration + 1:04d}_nominal.pkl")
+                final_state.save(filename=final_nominal_file)
+                self.log(f"Saved final nominal BBA state: {os.path.basename(final_nominal_file)}")
             screens_f = final_state.get_screens()
             print("Screen values after correction:")
             print(f"Sigx: {screens_f['sigx']}")
@@ -1158,10 +1381,11 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS, Sextupole_Rest
             else:
                 self.log("Correction finished.")
             if not silent:
-                self.save_session_settings(w1, w2, w3, rcond, iters, gain, beta, self.max_horizontal_current_spinbox.value(), self.max_vertical_current_spinbox.value(),
+                self.save_session_settings(w1, w2, w3, rcond, iters, gain, beta,
+                                           self.max_horizontal_current_spinbox.value(),
+                                           self.max_vertical_current_spinbox.value(),
                                            bool(self.triangular_checkbox.isChecked()), self.bpm_weights, Axx, Ayy, Axy,
-                                           Ayx, Bx, By, bool(self.subtract_jitter_checkbox.isChecked()),
-                                           machine_state_file=machine_state)
+                                           Ayx, Bx, By, bool(self.subtract_jitter_checkbox.isChecked()))
             if preserve_plots and plot_snapshot is not None:
                 self._hist_orbit_x[:] = plot_snapshot["orbit_x"]
                 self._hist_orbit_y[:] = plot_snapshot["orbit_y"]
@@ -1199,35 +1423,13 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS, Sextupole_Rest
             QMessageBox.critical(self, "Correction error", str(e))
             self.log(f"Correction error: {e}")
             print_exception(e)  # it shows even the line that generated that error
+        finally:
+            self._running = False
 
     def _stop_correction(self):
         self._cancel = True
         QMessageBox.information(self, "Correction", "Stop requested. Finishing current iteration...")
         self.log("Stop requested. Finishing current iteration...")
-
-    def _show_orbit_RMS_plots(self):
-        if self.rms_plots is None:
-            self.rms_plots = RMS_Plots(self)
-        if not hasattr(self, "rms_orbits_data") or self.rms_orbits_data is None:
-            QMessageBox.information(self, "Error", "No RMS orbits available.")
-        else:
-            self.rms_plots.plot_all(selected_bpms=self.rms_orbits_data["selected_bpms"],
-                                    start_x=self.rms_orbits_data.get("start_x"),
-                                    start_y=self.rms_orbits_data.get("start_y"),
-                                    current_x=self.rms_orbits_data.get("current_x"),
-                                    current_y=self.rms_orbits_data.get("current_y"),
-                                    final_x=self.rms_orbits_data.get("final_x"),
-                                    final_y=self.rms_orbits_data.get("final_y"),
-                                    x1_vals=self.rms_orbits_data.get("x1_vals"),
-                                    y1_vals=self.rms_orbits_data.get("y1_vals"),
-                                    x2_vals=self.rms_orbits_data.get("x2_vals"),
-                                    y2_vals=self.rms_orbits_data.get("y2_vals"),
-                                    rms_x_iter=self._hist_abs_rms_x, rms_y_iter=self._hist_abs_rms_y,
-                                    rms_xy_iter=self._hist_abs_rms_xy, nominal_x=self.rms_orbits_data.get("nominal_x"),
-                                    nominal_y=self.rms_orbits_data.get("nominal_y"))
-        self.rms_plots.show()
-        self.rms_plots.raise_()
-        self.rms_plots.activateWindow()
 
     def _show_test_orbits(self):
         if self.test_orbits is None:
@@ -1238,7 +1440,9 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS, Sextupole_Rest
             self.test_orbits._plot_test_orbits(selected_bpms=self.test_orbits_data["selected_bpms"],
                                                O0x=self.test_orbits_data["O0x"], O0y=self.test_orbits_data["O0y"],
                                                O1x=self.test_orbits_data["O1x"], O1y=self.test_orbits_data["O1y"],
-                                               O2x=self.test_orbits_data["O2x"], O2y=self.test_orbits_data["O2y"])
+                                               O2x=self.test_orbits_data["O2x"], O2y=self.test_orbits_data["O2y"],
+                                               dfs_err_x=self.test_orbits_data["dfs_err_x"],
+                                               dfs_err_y=self.test_orbits_data["dfs_err_y"])
         self.test_orbits.show()
         self.test_orbits.raise_()
         self.test_orbits.activateWindow()
@@ -1262,6 +1466,8 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS, Sextupole_Rest
         # it doesnt do fresh start, it only clears the graphs
         self._cancel = True
         self._hist_orbit_x.clear(), self._hist_orbit_y.clear()
+        self._hist_transmission.clear()
+        self.initial_charge_value = None
         self._hist_disp_x.clear(), self._hist_disp_y.clear()
         self._hist_wake_x.clear(), self._hist_wake_y.clear()
         self._hist_orbit.clear(), self._hist_disp.clear(), self._hist_wake.clear()
@@ -1269,31 +1475,21 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS, Sextupole_Rest
         self._hist_disp_x_err.clear(), self._hist_disp_y_err.clear(), self._hist_disp_err.clear()
         self._hist_wake_x_err.clear(), self._hist_wake_y_err.clear(), self._hist_wake_err.clear()
 
-        if self.actuator_mode == ActuatorMode.QM:
-            self._refresh_metric_plots_for_mode()
-        else:
-            self._plot_series(self.traj_ax, self.traj_canvas, values_x=[], values_y=[], vals=[], title=None)
-            self._plot_series(self.disp_ax, self.disp_canvas, values_x=[], values_y=[], vals=[], title=None)
-            self._plot_series(self.wake_ax, self.wake_canvas, values_x=[], values_y=[], vals=[], title=None)
+        self._plot_series(self.traj_ax, self.traj_canvas, values_x=[], values_y=[], vals=[], title=None)
+        self._plot_series(self.disp_ax, self.disp_canvas, values_x=[], values_y=[], vals=[], title=None)
+        self._plot_series(self.wake_ax, self.wake_canvas, values_x=[], values_y=[], vals=[], title=None)
         self._refresh_all_plot_popups()
 
     def _refresh_metric_plots_for_mode(self):
-        if self.actuator_mode == ActuatorMode.QM:
-            self.plot_widget_4.setEnabled(False)
-            self.plot_widget_5.setEnabled(False)
-            self._plot_series(self.traj_ax, self.traj_canvas, [], [], [], title="QM - distance from initial trajectory")
-            self._plot_disabled_panel(self.disp_ax, self.disp_canvas, title="DFS not used in QM mode")
-            self._plot_disabled_panel(self.wake_ax, self.wake_canvas, title="WFS not used in QM mode")
-        else:
-            self.plot_widget_4.setEnabled(True)
-            self.plot_widget_5.setEnabled(True)
-            if self.disp_ax is not None:
-                self.disp_ax.set_facecolor("white")
-            if self.wake_ax is not None:
-                self.wake_ax.set_facecolor("white")
-            self._plot_series(self.traj_ax, self.traj_canvas, [], [], [], title=None)
-            self._plot_series(self.disp_ax, self.disp_canvas, [], [], [], title=None)
-            self._plot_series(self.wake_ax, self.wake_canvas, [], [], [], title=None)
+        self.plot_widget_4.setEnabled(True)
+        self.plot_widget_5.setEnabled(True)
+        if self.disp_ax is not None:
+            self.disp_ax.set_facecolor("white")
+        if self.wake_ax is not None:
+            self.wake_ax.set_facecolor("white")
+        self._plot_series(self.traj_ax, self.traj_canvas, [], [], [], title=None)
+        self._plot_series(self.disp_ax, self.disp_canvas, [], [], [], title=None)
+        self._plot_series(self.wake_ax, self.wake_canvas, [], [], [], title=None)
 
     def _apply_jitter_subtraction_to_state(self, state):
         if self.jitter_model is None:
@@ -1301,7 +1497,7 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS, Sextupole_Rest
         state.bpms = apply_jitter_subtraction(state.get_bpms(), self.jitter_model)
         return state
 
-    def handling(self, app_name, cwd=None, args=None, is_qm_mode=False):
+    def handling(self, app_name, cwd=None, args=None):
         try:
             path = os.path.join(os.path.dirname(__file__), app_name)
             workdir = os.path.expanduser(os.path.expandvars(cwd))
@@ -1311,10 +1507,6 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS, Sextupole_Rest
             env = QProcessEnvironment.systemEnvironment()
             proc.setProcessEnvironment(env)
             argv = [path] + list(args or [])
-            if is_qm_mode:
-                argv += ["--actuator_mode", "QM"]
-            else:
-                argv += ["--actuator_mode", "Kicker"]
             proc.start(sys.executable, argv)
             proc.readyReadStandardOutput.connect(
                 lambda p=proc: print(bytes(p.readAllStandardOutput()).decode(errors="ignore")))
@@ -1330,7 +1522,6 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS, Sextupole_Rest
         dispersion_dir = self.dfs_response_3.text()
         wakefield_dir = self.wfs_response_3.text()
         selected_mode = None
-        is_qm = self.actuator_mode == ActuatorMode.QM
         for rb in self.radio_buttons:
             if rb.isChecked():
                 selected_mode = rb.text()
@@ -1356,13 +1547,13 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS, Sextupole_Rest
                 return
             args = ["--dir1", wakefield_dir, "--dir2", orbit_dir, "--diff", "--compute"]
 
-        self.handling('ComputeResponseMatrix_GUI.py', cwd=self.cwd, args=args,
-                      is_qm_mode=is_qm)  # args = arguments passed to the second program
+        self.handling('ComputeResponseMatrix_GUI.py', cwd=self.cwd, args=args)
 
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     from Backend import SelectInterface
+
     dialog = SelectInterface.choose_acc_and_interface()
     if dialog is None:
         print("Selection cancelled.")
@@ -1370,6 +1561,7 @@ if __name__ == "__main__":
 
     I = dialog
     project_name = I.get_name()
+
     nominal_state = None
     start_state = I.get_state()
 

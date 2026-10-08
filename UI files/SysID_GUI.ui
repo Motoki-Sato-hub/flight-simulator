@@ -7,7 +7,7 @@
     <x>0</x>
     <y>0</y>
     <width>1512</width>
-    <height>813</height>
+    <height>782</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -31,13 +31,13 @@
      <number>16</number>
     </property>
     <item>
-     <layout class="QVBoxLayout" name="verticalLayout">
+     <layout class="QVBoxLayout" name="verticalLayout" stretch="1,0,0">
       <item>
-       <layout class="QHBoxLayout" name="horizontal_layout">
+       <layout class="QHBoxLayout" name="horizontal_layout" stretch="0,1">
         <item>
          <widget class="QGroupBox" name="devicesGroup">
           <property name="sizePolicy">
-           <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+           <sizepolicy hsizetype="Fixed" vsizetype="Expanding">
             <horstretch>0</horstretch>
             <verstretch>0</verstretch>
            </sizepolicy>
@@ -59,7 +59,7 @@ QGroupBox#devicesGroup::title {
           <property name="title">
            <string>Devices</string>
           </property>
-          <layout class="QVBoxLayout" name="left_layout">
+          <layout class="QVBoxLayout" name="left_layout" stretch="1,1">
            <property name="spacing">
             <number>8</number>
            </property>
@@ -77,6 +77,12 @@ QGroupBox#devicesGroup::title {
            </property>
            <item>
             <widget class="QGroupBox" name="correctorsGroup">
+             <property name="sizePolicy">
+              <sizepolicy hsizetype="Preferred" vsizetype="Expanding">
+               <horstretch>0</horstretch>
+               <verstretch>0</verstretch>
+              </sizepolicy>
+             </property>
              <property name="styleSheet">
               <string notr="true">QGroupBox#correctorsGroup {
     background-color: rgb(245, 245, 245);
@@ -94,7 +100,7 @@ QGroupBox#correctorsGroup::title {
              <property name="title">
               <string>Correctors</string>
              </property>
-             <layout class="QVBoxLayout" name="correctors_group_vbox">
+             <layout class="QVBoxLayout" name="correctors_group_vbox" stretch="0,0,1,0">
               <property name="spacing">
                <number>6</number>
               </property>
@@ -167,6 +173,12 @@ QGroupBox#correctorsGroup::title {
            </item>
            <item>
             <widget class="QGroupBox" name="bpmsGroup">
+             <property name="sizePolicy">
+              <sizepolicy hsizetype="Preferred" vsizetype="Expanding">
+               <horstretch>0</horstretch>
+               <verstretch>0</verstretch>
+              </sizepolicy>
+             </property>
              <property name="styleSheet">
               <string notr="true">QGroupBox#bpmsGroup {
     background-color: rgb(245, 245, 245);
@@ -184,7 +196,7 @@ QGroupBox#bpmsGroup::title {
              <property name="title">
               <string>BPMs</string>
              </property>
-             <layout class="QVBoxLayout" name="bpms_group_vbox">
+             <layout class="QVBoxLayout" name="bpms_group_vbox" stretch="1,0">
               <property name="spacing">
                <number>6</number>
               </property>
@@ -245,7 +257,7 @@ QGroupBox#bpmsGroup::title {
          </widget>
         </item>
         <item>
-         <layout class="QVBoxLayout" name="right_layout">
+         <layout class="QVBoxLayout" name="right_layout" stretch="0,0,1">
           <property name="spacing">
            <number>2</number>
           </property>
@@ -639,6 +651,9 @@ QGroupBox::title {
                    <property name="decimals">
                     <number>5</number>
                    </property>
+                   <property name="maximum">
+                    <double>10000.000000000000000</double>
+                   </property>
                    <property name="singleStep">
                     <double>0.100000000000000</double>
                    </property>
@@ -664,6 +679,9 @@ QGroupBox::title {
                    </property>
                    <property name="decimals">
                     <number>5</number>
+                   </property>
+                   <property name="maximum">
+                    <double>10000.000000000000000</double>
                    </property>
                    <property name="singleStep">
                     <double>0.100000000000000</double>
@@ -701,6 +719,234 @@ QGroupBox::title {
                     </size>
                    </property>
                   </widget>
+                 </item>
+                 <item row="4" column="0">
+                  <widget class="QLabel" name="nsamples_label">
+                   <property name="minimumSize">
+                    <size>
+                     <width>120</width>
+                     <height>0</height>
+                    </size>
+                   </property>
+                   <property name="maximumSize">
+                    <size>
+                     <width>120</width>
+                     <height>16777215</height>
+                    </size>
+                   </property>
+                   <property name="text">
+                    <string>BPM samples</string>
+                   </property>
+                  </widget>
+                 </item>
+                 <item row="4" column="1">
+                 <widget class="QLineEdit" name="nsamples_input">
+                   <property name="toolTip">
+                    <string>Number of BPM samples acquired for each SysID measurement. Larger values reduce random noise but increase measurement time.</string>
+                   </property>
+                   <property name="maximumSize">
+                    <size>
+                     <width>300</width>
+                     <height>16777215</height>
+                    </size>
+                   </property>
+                  </widget>
+                 </item>
+                 <item row="4" column="2">
+                  <widget class="QToolButton" name="nsamples_tooltip">
+                   <property name="toolTip">
+                    <string>Number of BPM samples acquired for each SysID measurement. Larger values reduce random noise but increase measurement time.</string>
+                   </property>
+                   <property name="styleSheet">
+                    <string notr="true">QToolButton#nsamples_tooltip {
+    border: 1px solid #888;
+    border-radius: 10px;
+    min-width: 20px;
+    max-width: 20px;
+    min-height: 20px;
+    max-height: 20px;
+    padding: 0px;
+    font-weight: bold;
+}
+QToolButton#nsamples_tooltip:hover {
+    background-color: #e6e6e6;
+}</string>
+                   </property>
+                   <property name="text">
+                    <string>?</string>
+                   </property>
+                  </widget>
+                 </item>
+                 <item row="5" column="0" colspan="7">
+                  <layout class="QHBoxLayout" name="beam_change_groups_layout">
+                   <property name="spacing"><number>12</number></property>
+                   <property name="leftMargin"><number>0</number></property>
+                   <property name="topMargin"><number>0</number></property>
+                   <property name="rightMargin"><number>0</number></property>
+                   <property name="bottomMargin"><number>0</number></property>
+                   <item>
+                    <widget class="QGroupBox" name="intensity_change_group">
+                     <property name="title"><string>Change intensity</string></property>
+                     <layout class="QHBoxLayout" name="intensity_change_values_layout">
+                      <property name="spacing"><number>6</number></property>
+                      <property name="leftMargin"><number>8</number></property>
+                      <property name="topMargin"><number>8</number></property>
+                      <property name="rightMargin"><number>8</number></property>
+                      <property name="bottomMargin"><number>8</number></property>
+                      <item>
+                       <widget class="QWidget" name="intensity_nominal_container">
+                        <layout class="QHBoxLayout" name="intensity_nominal_value_layout">
+                         <property name="spacing"><number>6</number></property>
+                         <property name="leftMargin"><number>0</number></property>
+                         <property name="topMargin"><number>0</number></property>
+                         <property name="rightMargin"><number>0</number></property>
+                         <property name="bottomMargin"><number>0</number></property>
+                         <item>
+                          <widget class="QLabel" name="intensity_nominal_label">
+                           <property name="text"><string>Nominal</string></property>
+                          </widget>
+                         </item>
+                         <item>
+                          <widget class="QLineEdit" name="intensity_nominal_input">
+                           <property name="maximumSize"><size><width>110</width><height>16777215</height></size></property>
+                          </widget>
+                         </item>
+                        </layout>
+                       </widget>
+                      </item>
+                      <item>
+                       <widget class="QWidget" name="intensity_test_container">
+                        <layout class="QHBoxLayout" name="intensity_test_value_layout">
+                         <property name="spacing"><number>6</number></property>
+                         <property name="leftMargin"><number>0</number></property>
+                         <property name="topMargin"><number>0</number></property>
+                         <property name="rightMargin"><number>0</number></property>
+                         <property name="bottomMargin"><number>0</number></property>
+                         <item>
+                          <widget class="QLabel" name="intensity_test_label">
+                           <property name="text"><string>Test</string></property>
+                          </widget>
+                         </item>
+                         <item>
+                          <widget class="QLineEdit" name="intensity_test_input">
+                           <property name="maximumSize"><size><width>110</width><height>16777215</height></size></property>
+                          </widget>
+                         </item>
+                        </layout>
+                       </widget>
+                      </item>
+                      <item>
+                       <widget class="QToolButton" name="intensity_change_tooltip">
+                        <property name="styleSheet">
+                         <string notr="true">QToolButton#intensity_change_tooltip {
+    border: 1px solid #888;
+    border-radius: 10px;
+    min-width: 20px;
+    max-width: 20px;
+    min-height: 20px;
+    max-height: 20px;
+    padding: 0px;
+    font-weight: bold;
+}
+QToolButton#intensity_change_tooltip:hover {
+    background-color: #e6e6e6;
+}</string>
+                        </property>
+                        <property name="text"><string>?</string></property>
+                       </widget>
+                      </item>
+                      <item>
+                       <spacer name="intensity_change_right_spacer">
+                        <property name="orientation"><enum>Qt::Horizontal</enum></property>
+                        <property name="sizeType"><enum>QSizePolicy::Expanding</enum></property>
+                        <property name="sizeHint" stdset="0"><size><width>0</width><height>20</height></size></property>
+                       </spacer>
+                      </item>
+                     </layout>
+                    </widget>
+                   </item>
+                   <item>
+                    <widget class="QGroupBox" name="energy_change_group">
+                     <property name="title"><string>Change energy</string></property>
+                     <layout class="QHBoxLayout" name="energy_change_values_layout">
+                      <property name="spacing"><number>6</number></property>
+                      <property name="leftMargin"><number>8</number></property>
+                      <property name="topMargin"><number>8</number></property>
+                      <property name="rightMargin"><number>8</number></property>
+                      <property name="bottomMargin"><number>8</number></property>
+                      <item>
+                       <widget class="QWidget" name="energy_nominal_container">
+                        <layout class="QHBoxLayout" name="energy_nominal_value_layout">
+                         <property name="spacing"><number>6</number></property>
+                         <property name="leftMargin"><number>0</number></property>
+                         <property name="topMargin"><number>0</number></property>
+                         <property name="rightMargin"><number>0</number></property>
+                         <property name="bottomMargin"><number>0</number></property>
+                         <item>
+                          <widget class="QLabel" name="energy_nominal_label">
+                           <property name="text"><string>Nominal</string></property>
+                          </widget>
+                         </item>
+                         <item>
+                          <widget class="QLineEdit" name="energy_nominal_input">
+                           <property name="maximumSize"><size><width>110</width><height>16777215</height></size></property>
+                          </widget>
+                         </item>
+                        </layout>
+                       </widget>
+                      </item>
+                      <item>
+                       <widget class="QWidget" name="energy_test_container">
+                        <layout class="QHBoxLayout" name="energy_test_value_layout">
+                         <property name="spacing"><number>6</number></property>
+                         <property name="leftMargin"><number>0</number></property>
+                         <property name="topMargin"><number>0</number></property>
+                         <property name="rightMargin"><number>0</number></property>
+                         <property name="bottomMargin"><number>0</number></property>
+                         <item>
+                          <widget class="QLabel" name="energy_test_label">
+                           <property name="text"><string>Test</string></property>
+                          </widget>
+                         </item>
+                         <item>
+                          <widget class="QLineEdit" name="energy_test_input">
+                           <property name="maximumSize"><size><width>110</width><height>16777215</height></size></property>
+                          </widget>
+                         </item>
+                        </layout>
+                       </widget>
+                      </item>
+                      <item>
+                       <widget class="QToolButton" name="energy_change_tooltip">
+                        <property name="styleSheet">
+                         <string notr="true">QToolButton#energy_change_tooltip {
+    border: 1px solid #888;
+    border-radius: 10px;
+    min-width: 20px;
+    max-width: 20px;
+    min-height: 20px;
+    max-height: 20px;
+    padding: 0px;
+    font-weight: bold;
+}
+QToolButton#energy_change_tooltip:hover {
+    background-color: #e6e6e6;
+}</string>
+                        </property>
+                        <property name="text"><string>?</string></property>
+                       </widget>
+                      </item>
+                      <item>
+                       <spacer name="energy_change_right_spacer">
+                        <property name="orientation"><enum>Qt::Horizontal</enum></property>
+                        <property name="sizeType"><enum>QSizePolicy::Expanding</enum></property>
+                        <property name="sizeHint" stdset="0"><size><width>0</width><height>20</height></size></property>
+                       </spacer>
+                      </item>
+                     </layout>
+                    </widget>
+                   </item>
+                  </layout>
                  </item>
                 </layout>
                </widget>

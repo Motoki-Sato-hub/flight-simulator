@@ -1,0 +1,1080 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>MainWindow</class>
+ <widget class="QMainWindow" name="MainWindow">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>1450</width>
+    <height>807</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>Bumps Application</string>
+  </property>
+  <widget class="QWidget" name="centralwidget">
+   <layout class="QVBoxLayout" name="main_layout" stretch="0">
+    <property name="leftMargin">
+     <number>8</number>
+    </property>
+    <property name="topMargin">
+     <number>8</number>
+    </property>
+    <property name="rightMargin">
+     <number>8</number>
+    </property>
+    <property name="bottomMargin">
+     <number>8</number>
+    </property>
+    <item>
+     <widget class="QTabWidget" name="main_tab_widget">
+      <property name="tabPosition">
+       <enum>QTabWidget::North</enum>
+      </property>
+      <property name="currentIndex">
+       <number>1</number>
+      </property>
+      <widget class="QWidget" name="files_tab">
+       <attribute name="title">
+        <string>Directories</string>
+       </attribute>
+       <layout class="QVBoxLayout" name="files_layout">
+        <item>
+         <layout class="QHBoxLayout" name="response_directory_layout">
+          <item>
+           <widget class="QLabel" name="label_response_dir">
+            <property name="minimumSize">
+             <size>
+              <width>150</width>
+              <height>0</height>
+             </size>
+            </property>
+            <property name="maximumSize">
+             <size>
+              <width>150</width>
+              <height>16777215</height>
+             </size>
+            </property>
+            <property name="text">
+             <string>Directory:</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QToolButton" name="directory_tooltip">
+            <property name="minimumSize">
+             <size>
+              <width>22</width>
+              <height>22</height>
+             </size>
+            </property>
+            <property name="maximumSize">
+             <size>
+              <width>22</width>
+              <height>22</height>
+             </size>
+            </property>
+            <property name="focusPolicy">
+             <enum>Qt::NoFocus</enum>
+            </property>
+            <property name="toolTip">
+             <string>Directory containing the response-matrix measurement data. Load it before selecting devices or computing a bump.</string>
+            </property>
+            <property name="styleSheet">
+             <string notr="true">QToolButton#directory_tooltip {
+    border: 1px solid #888;
+    border-radius: 10px;
+    min-width: 20px;
+    max-width: 20px;
+    min-height: 20px;
+    max-height: 20px;
+    padding: 0px;
+    font-weight: bold;
+}
+QToolButton#directory_tooltip:hover {
+    background-color: #e6e6e6;
+}</string>
+            </property>
+            <property name="text">
+             <string>?</string>
+            </property>
+            <property name="autoRaise">
+             <bool>true</bool>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QLineEdit" name="response_dir_edit">
+            <property name="placeholderText">
+             <string>Load response matrix...</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QPushButton" name="browse_response_button">
+            <property name="maximumSize">
+             <size>
+              <width>42</width>
+              <height>16777215</height>
+             </size>
+            </property>
+            <property name="text">
+             <string>…</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </item>
+        <item>
+         <layout class="QHBoxLayout" name="session_layout">
+          <item>
+           <widget class="QLabel" name="session_label">
+            <property name="minimumSize">
+             <size>
+              <width>150</width>
+              <height>0</height>
+             </size>
+            </property>
+            <property name="maximumSize">
+             <size>
+              <width>150</width>
+              <height>16777215</height>
+             </size>
+            </property>
+            <property name="text">
+             <string>Session:</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QToolButton" name="session_tooltip">
+            <property name="minimumSize">
+             <size>
+              <width>22</width>
+              <height>22</height>
+             </size>
+            </property>
+            <property name="maximumSize">
+             <size>
+              <width>22</width>
+              <height>22</height>
+             </size>
+            </property>
+            <property name="focusPolicy">
+             <enum>Qt::NoFocus</enum>
+            </property>
+            <property name="toolTip">
+             <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;By default, shows the place where your session data will be saved. &lt;/p&gt;&lt;p&gt;Choosing an existing session loads its saved settings.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+            </property>
+            <property name="styleSheet">
+             <string notr="true">QToolButton#session_tooltip {
+    border: 1px solid #888;
+    border-radius: 10px;
+    min-width: 20px;
+    max-width: 20px;
+    min-height: 20px;
+    max-height: 20px;
+    padding: 0px;
+    font-weight: bold;
+}
+QToolButton#session_tooltip:hover {
+    background-color: #e6e6e6;
+}</string>
+            </property>
+            <property name="text">
+             <string>?</string>
+            </property>
+            <property name="autoRaise">
+             <bool>true</bool>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QLineEdit" name="loadsave_session_edit"/>
+          </item>
+          <item>
+           <widget class="QPushButton" name="browse_session_button">
+            <property name="maximumSize">
+             <size>
+              <width>42</width>
+              <height>16777215</height>
+             </size>
+            </property>
+            <property name="text">
+             <string>…</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </item>
+        <item>
+         <layout class="QHBoxLayout" name="machine_status_layout">
+          <item>
+           <widget class="QLabel" name="corr_status_label">
+            <property name="minimumSize">
+             <size>
+              <width>150</width>
+              <height>0</height>
+             </size>
+            </property>
+            <property name="maximumSize">
+             <size>
+              <width>150</width>
+              <height>16777215</height>
+             </size>
+            </property>
+            <property name="text">
+             <string>Corrector status:</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QToolButton" name="corr_status_tooltip">
+            <property name="minimumSize">
+             <size>
+              <width>22</width>
+              <height>22</height>
+             </size>
+            </property>
+            <property name="maximumSize">
+             <size>
+              <width>22</width>
+              <height>22</height>
+             </size>
+            </property>
+            <property name="focusPolicy">
+             <enum>Qt::NoFocus</enum>
+            </property>
+            <property name="toolTip">
+             <string>Corrector-status file to load. It is the Bumps equivalent of BBA machine status and contains corrector settings only.</string>
+            </property>
+            <property name="styleSheet">
+             <string notr="true">QToolButton#corr_status_tooltip {
+    border: 1px solid #888;
+    border-radius: 10px;
+    min-width: 20px;
+    max-width: 20px;
+    min-height: 20px;
+    max-height: 20px;
+    padding: 0px;
+    font-weight: bold;
+}
+QToolButton#corr_status_tooltip:hover {
+    background-color: #e6e6e6;
+}</string>
+            </property>
+            <property name="text">
+             <string>?</string>
+            </property>
+            <property name="autoRaise">
+             <bool>true</bool>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QLineEdit" name="corr_status_edit"/>
+          </item>
+          <item>
+           <widget class="QPushButton" name="corr_status_load">
+            <property name="maximumSize">
+             <size>
+              <width>42</width>
+              <height>16777215</height>
+             </size>
+            </property>
+            <property name="text">
+             <string>…</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </item>
+        <item>
+         <layout class="QHBoxLayout" name="horizontalLayout">
+          <item>
+           <spacer name="horizontalSpacer_2">
+            <property name="orientation">
+             <enum>Qt::Horizontal</enum>
+            </property>
+            <property name="sizeHint" stdset="0">
+             <size>
+              <width>40</width>
+              <height>20</height>
+             </size>
+            </property>
+           </spacer>
+          </item>
+          <item>
+           <widget class="QPushButton" name="show_response_matrix">
+            <property name="text">
+             <string>Compute Response Matrix</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <spacer name="horizontalSpacer_3">
+            <property name="orientation">
+             <enum>Qt::Horizontal</enum>
+            </property>
+            <property name="sizeHint" stdset="0">
+             <size>
+              <width>40</width>
+              <height>20</height>
+             </size>
+            </property>
+           </spacer>
+          </item>
+         </layout>
+        </item>
+       </layout>
+      </widget>
+      <widget class="QWidget" name="bump_tab">
+       <attribute name="title">
+        <string>Bump Design</string>
+       </attribute>
+       <layout class="QVBoxLayout" name="bump_layout" stretch="0,1">
+        <item>
+         <layout class="QHBoxLayout" name="top_bar_layout" stretch="1,0">
+          <item>
+           <widget class="QGroupBox" name="responseGroup">
+            <property name="title">
+             <string>Parameters</string>
+            </property>
+            <layout class="QVBoxLayout" name="response_layout">
+             <item>
+              <layout class="QHBoxLayout" name="response_parameters_layout">
+               <item>
+                <widget class="QLabel" name="pinv_label">
+                 <property name="minimumSize">
+                  <size>
+                   <width>130</width>
+                   <height>0</height>
+                  </size>
+                 </property>
+                 <property name="maximumSize">
+                  <size>
+                   <width>130</width>
+                   <height>16777215</height>
+                  </size>
+                 </property>
+                 <property name="text">
+                  <string>PINV tolerance</string>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <widget class="QLineEdit" name="pinv_edit">
+                 <property name="maximumSize">
+                  <size>
+                   <width>50</width>
+                   <height>16777215</height>
+                  </size>
+                 </property>
+                 <property name="text">
+                  <string>0.001</string>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <widget class="QToolButton" name="pinv_tooltip">
+                 <property name="minimumSize">
+                  <size>
+                   <width>22</width>
+                   <height>22</height>
+                  </size>
+                 </property>
+                 <property name="maximumSize">
+                  <size>
+                   <width>22</width>
+                   <height>22</height>
+                  </size>
+                 </property>
+                 <property name="focusPolicy">
+                  <enum>Qt::NoFocus</enum>
+                 </property>
+                 <property name="toolTip">
+                  <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;PINV tolerance sets the pseudoinverse cutoff. &lt;/p&gt;&lt;p&gt;&lt;span style=&quot; font-weight:600;&quot;&gt;Smaller values&lt;/span&gt; keep &lt;span style=&quot; font-weight:600;&quot;&gt;more modes&lt;/span&gt; and give &lt;span style=&quot; font-weight:600;&quot;&gt;stronger but noisier correction&lt;/span&gt;. &lt;/p&gt;&lt;p&gt;&lt;span style=&quot; font-weight:600;&quot;&gt;Larger values&lt;/span&gt; remove &lt;span style=&quot; font-weight:600;&quot;&gt;weak modes&lt;/span&gt;, making &lt;span style=&quot; font-weight:600;&quot;&gt;correction more stable but sometimes weaker&lt;/span&gt;.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+                 </property>
+                 <property name="styleSheet">
+                  <string notr="true">QToolButton#pinv_tooltip {
+    border: 1px solid #888;
+    border-radius: 10px;
+    min-width: 20px;
+    max-width: 20px;
+    min-height: 20px;
+    max-height: 20px;
+    padding: 0px;
+    font-weight: bold;
+}
+QToolButton#pinv_tooltip:hover {
+    background-color: #e6e6e6;
+}</string>
+                 </property>
+                 <property name="text">
+                  <string>?</string>
+                 </property>
+                 <property name="autoRaise">
+                  <bool>true</bool>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <spacer name="response_parameters_spacer">
+                 <property name="orientation">
+                  <enum>Qt::Horizontal</enum>
+                 </property>
+                 <property name="sizeType">
+                  <enum>QSizePolicy::Fixed</enum>
+                 </property>
+                 <property name="sizeHint" stdset="0">
+                  <size>
+                   <width>20</width>
+                   <height>20</height>
+                  </size>
+                 </property>
+                </spacer>
+               </item>
+               <item>
+                <widget class="QLabel" name="beta_label">
+                 <property name="minimumSize">
+                  <size>
+                   <width>130</width>
+                   <height>0</height>
+                  </size>
+                 </property>
+                 <property name="maximumSize">
+                  <size>
+                   <width>130</width>
+                   <height>16777215</height>
+                  </size>
+                 </property>
+                 <property name="text">
+                  <string>Beta parameter</string>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <widget class="QLineEdit" name="beta_edit">
+                 <property name="maximumSize">
+                  <size>
+                   <width>50</width>
+                   <height>16777215</height>
+                  </size>
+                 </property>
+                 <property name="text">
+                  <string>0</string>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <widget class="QToolButton" name="beta_tooltip">
+                 <property name="minimumSize">
+                  <size>
+                   <width>22</width>
+                   <height>22</height>
+                  </size>
+                 </property>
+                 <property name="maximumSize">
+                  <size>
+                   <width>22</width>
+                   <height>22</height>
+                  </size>
+                 </property>
+                 <property name="focusPolicy">
+                  <enum>Qt::NoFocus</enum>
+                 </property>
+                 <property name="toolTip">
+                  <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Tikhonov regularization strength. &lt;/p&gt;&lt;p&gt;If beta &amp;gt; 0, the solver uses (A^T A + beta I)^-1 to stabilize the correction.&lt;/p&gt;&lt;p&gt;&lt;br/&gt;&lt;/p&gt;&lt;p&gt;Use &lt;span style=&quot; font-weight:600;&quot;&gt;0 for standard pseudo-inverse.&lt;/span&gt;&lt;/p&gt;&lt;p&gt;&lt;span style=&quot; font-weight:600;&quot;&gt;Increase&lt;/span&gt; it to &lt;span style=&quot; font-weight:600;&quot;&gt;make the solution smoother and less sensitive to noise&lt;/span&gt;. &lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+                 </property>
+                 <property name="styleSheet">
+                  <string notr="true">QToolButton#beta_tooltip {
+    border: 1px solid #888;
+    border-radius: 10px;
+    min-width: 20px;
+    max-width: 20px;
+    min-height: 20px;
+    max-height: 20px;
+    padding: 0px;
+    font-weight: bold;
+}
+QToolButton#beta_tooltip:hover {
+    background-color: #e6e6e6;
+}</string>
+                 </property>
+                 <property name="text">
+                  <string>?</string>
+                 </property>
+                 <property name="autoRaise">
+                  <bool>true</bool>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <spacer name="horizontalSpacer">
+                 <property name="orientation">
+                  <enum>Qt::Horizontal</enum>
+                 </property>
+                 <property name="sizeType">
+                  <enum>QSizePolicy::Fixed</enum>
+                 </property>
+                 <property name="sizeHint" stdset="0">
+                  <size>
+                   <width>20</width>
+                   <height>20</height>
+                  </size>
+                 </property>
+                </spacer>
+               </item>
+               <item>
+                <widget class="QLabel" name="bpm_samples_label">
+                 <property name="maximumSize">
+                  <size>
+                   <width>130</width>
+                   <height>16777215</height>
+                  </size>
+                 </property>
+                 <property name="text">
+                  <string>BPM samples</string>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <widget class="QLineEdit" name="bpm_samples_edit">
+                 <property name="maximumSize">
+                  <size>
+                   <width>50</width>
+                   <height>16777215</height>
+                  </size>
+                 </property>
+                 <property name="text">
+                  <string>3</string>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <widget class="QToolButton" name="bpm_samples_tooltip">
+                 <property name="toolTip">
+                  <string>Number that indicates over how many data samples from BPMs we will average the result.</string>
+                 </property>
+                 <property name="styleSheet">
+                  <string notr="true">QToolButton#bpm_samples_tooltip {
+    border: 1px solid #888;
+    border-radius: 10px;
+    min-width: 20px;
+    max-width: 20px;
+    min-height: 20px;
+    max-height: 20px;
+    padding: 0px;
+    font-weight: bold;
+}
+QToolButton#bpm_samples_tooltip:hover {
+    background-color: #e6e6e6;
+}</string>
+                 </property>
+                 <property name="text">
+                  <string>?</string>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <spacer name="response_parameters_stretch">
+                 <property name="orientation">
+                  <enum>Qt::Horizontal</enum>
+                 </property>
+                 <property name="sizeType">
+                  <enum>QSizePolicy::Fixed</enum>
+                 </property>
+                 <property name="sizeHint" stdset="0">
+                  <size>
+                   <width>20</width>
+                   <height>20</height>
+                  </size>
+                 </property>
+                </spacer>
+               </item>
+               <item>
+                <widget class="QCheckBox" name="triangular_checkbox">
+                 <property name="text">
+                  <string>Force Triangular Matrix</string>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <widget class="QToolButton" name="triangular_toolbox">
+                 <property name="styleSheet">
+                  <string notr="true">QToolButton#triangular_toolbox {
+    border: 1px solid #888;
+    border-radius: 10px;
+    min-width: 20px;
+    max-width: 20px;
+    min-height: 20px;
+    max-height: 20px;
+    padding: 0px;
+    font-weight: bold;
+}
+QToolButton#triangular_toolbox:hover {
+    background-color: #e6e6e6;
+}</string>
+                 </property>
+                 <property name="text">
+                  <string>?</string>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <widget class="QGroupBox" name="current_groupbox_right">
+                 <property name="styleSheet">
+                  <string notr="true">QGroupBox#current_groupbox_right {
+    background-color: rgb(245, 245, 245);
+    border: 1px solid rgb(210, 210, 210);
+    border-radius: 6px;
+    margin-top: 8px;
+    padding-top: 6px;
+}
+QGroupBox#current_groupbox_right::title {
+    subcontrol-origin: margin;
+    left: 10px;
+    padding: 0 4px 0 4px;
+}</string>
+                 </property>
+                 <property name="title">
+                  <string>Max strength (gauss*m)</string>
+                 </property>
+                 <layout class="QVBoxLayout" name="current_groupbox_layout">
+                  <property name="spacing">
+                   <number>6</number>
+                  </property>
+                  <property name="leftMargin">
+                   <number>6</number>
+                  </property>
+                  <property name="topMargin">
+                   <number>6</number>
+                  </property>
+                  <property name="rightMargin">
+                   <number>6</number>
+                  </property>
+                  <property name="bottomMargin">
+                   <number>6</number>
+                  </property>
+                  <item>
+                   <layout class="QHBoxLayout" name="current_layout">
+                    <item>
+                     <widget class="QLabel" name="horizontal_current_label">
+                      <property name="text">
+                       <string>H:</string>
+                      </property>
+                     </widget>
+                    </item>
+                    <item>
+                     <widget class="QDoubleSpinBox" name="max_horizontal_current_spinbox">
+                      <property name="singleStep">
+                       <double>0.010000000000000</double>
+                      </property>
+                     </widget>
+                    </item>
+                    <item>
+                     <widget class="QLabel" name="vertical_current_label">
+                      <property name="text">
+                       <string> V:</string>
+                      </property>
+                     </widget>
+                    </item>
+                    <item>
+                     <widget class="QDoubleSpinBox" name="max_vertical_current_spinbox">
+                      <property name="singleStep">
+                       <double>0.010000000000000</double>
+                      </property>
+                     </widget>
+                    </item>
+                    <item>
+                     <widget class="QToolButton" name="max_strength_tooltip">
+                      <property name="toolTip">
+                       <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Maximum allowed corrector strength during correction. &lt;/p&gt;&lt;p&gt;&lt;br/&gt;&lt;/p&gt;&lt;p&gt;Computed corrections are clipped to these limits.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+                      </property>
+                      <property name="styleSheet">
+                       <string notr="true">QToolButton#max_strength_tooltip {
+    border: 1px solid #888;
+    border-radius: 10px;
+    min-width: 20px;
+    max-width: 20px;
+    min-height: 20px;
+    max-height: 20px;
+    padding: 0px;
+    font-weight: bold;
+}
+QToolButton#max_strength_tooltip:hover {
+    background-color: #e6e6e6;
+}</string>
+                      </property>
+                      <property name="text">
+                       <string>?</string>
+                      </property>
+                     </widget>
+                    </item>
+                   </layout>
+                  </item>
+                 </layout>
+                </widget>
+               </item>
+               <item>
+                <spacer name="horizontalSpacer_4">
+                 <property name="orientation">
+                  <enum>Qt::Horizontal</enum>
+                 </property>
+                 <property name="sizeHint" stdset="0">
+                  <size>
+                   <width>40</width>
+                   <height>20</height>
+                  </size>
+                 </property>
+                </spacer>
+               </item>
+              </layout>
+             </item>
+            </layout>
+           </widget>
+          </item>
+          <item>
+           <layout class="QVBoxLayout" name="logo_clock_layout">
+            <item>
+             <widget class="QLabel" name="logo_label">
+              <property name="minimumSize">
+               <size>
+                <width>120</width>
+                <height>78</height>
+               </size>
+              </property>
+              <property name="maximumSize">
+               <size>
+                <width>180</width>
+                <height>110</height>
+               </size>
+              </property>
+              <property name="text">
+               <string/>
+              </property>
+              <property name="alignment">
+               <set>Qt::AlignRight|Qt::AlignTop|Qt::AlignTrailing</set>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QLabel" name="machine_clock_label">
+              <property name="minimumSize">
+               <size>
+                <width>120</width>
+                <height>0</height>
+               </size>
+              </property>
+              <property name="maximumSize">
+               <size>
+                <width>180</width>
+                <height>16777215</height>
+               </size>
+              </property>
+              <property name="styleSheet">
+               <string notr="true">QLabel#machine_clock_label {
+    font-weight: 600;
+    padding: 4px 8px;
+}</string>
+              </property>
+              <property name="text">
+               <string>Time: --</string>
+              </property>
+              <property name="alignment">
+               <set>Qt::AlignCenter</set>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </item>
+         </layout>
+        </item>
+        <item>
+         <layout class="QHBoxLayout" name="content_layout" stretch="2,3,6">
+          <item>
+           <widget class="QGroupBox" name="devicesGroup">
+            <property name="title">
+             <string>Devices</string>
+            </property>
+            <layout class="QVBoxLayout" name="devices_layout">
+             <item>
+              <widget class="QGroupBox" name="correctorsGroup">
+               <property name="title">
+                <string>Correctors</string>
+               </property>
+               <layout class="QVBoxLayout" name="correctors_group_vbox">
+                <item>
+                 <widget class="QListWidget" name="correctors_list">
+                  <property name="toolTip">
+                   <string>Choose correctors that may be used in your later calculation.</string>
+                  </property>
+                  <property name="selectionMode">
+                   <enum>QAbstractItemView::MultiSelection</enum>
+                  </property>
+                 </widget>
+                </item>
+                <item>
+                 <layout class="QHBoxLayout" name="correctors_buttons_layout">
+                  <item>
+                   <widget class="QPushButton" name="save_correctors_button">
+                    <property name="text">
+                     <string>Save as…</string>
+                    </property>
+                   </widget>
+                  </item>
+                  <item>
+                   <widget class="QPushButton" name="load_correctors_button">
+                    <property name="text">
+                     <string>Load…</string>
+                    </property>
+                   </widget>
+                  </item>
+                  <item>
+                   <widget class="QPushButton" name="clear_correctors_button">
+                    <property name="text">
+                     <string>Clear</string>
+                    </property>
+                   </widget>
+                  </item>
+                 </layout>
+                </item>
+               </layout>
+              </widget>
+             </item>
+             <item>
+              <widget class="QGroupBox" name="bpmsGroup">
+               <property name="title">
+                <string>BPMs (click twice to adjust)</string>
+               </property>
+               <layout class="QVBoxLayout" name="bpms_group_vbox">
+                <item>
+                 <widget class="QListWidget" name="bpms_list">
+                  <property name="toolTip">
+                   <string>Double-click a BPM to set its desired orbit. The other BPM selections stay unchanged.</string>
+                  </property>
+                  <property name="selectionMode">
+                   <enum>QAbstractItemView::MultiSelection</enum>
+                  </property>
+                 </widget>
+                </item>
+                <item>
+                 <layout class="QHBoxLayout" name="bpms_buttons_layout">
+                  <item>
+                   <widget class="QPushButton" name="save_bpms_button">
+                    <property name="text">
+                     <string>Save as…</string>
+                    </property>
+                   </widget>
+                  </item>
+                  <item>
+                   <widget class="QPushButton" name="load_bpms_button">
+                    <property name="text">
+                     <string>Load…</string>
+                    </property>
+                   </widget>
+                  </item>
+                  <item>
+                   <widget class="QPushButton" name="clear_bpms_button">
+                    <property name="text">
+                     <string>Clear</string>
+                    </property>
+                   </widget>
+                  </item>
+                 </layout>
+                </item>
+               </layout>
+              </widget>
+             </item>
+            </layout>
+           </widget>
+          </item>
+          <item>
+           <layout class="QVBoxLayout" name="middle_layout" stretch="0,1">
+            <item>
+             <widget class="QGroupBox" name="bumpSetupGroup">
+              <property name="title">
+               <string>Bump setup</string>
+              </property>
+              <layout class="QVBoxLayout" name="bump_setup_layout">
+               <item>
+                <widget class="QPushButton" name="read_reference_button">
+                 <property name="text">
+                  <string>Read reference orbit</string>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <widget class="QPushButton" name="clear_targets_button">
+                 <property name="text">
+                  <string>Clear all desired bumps</string>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <widget class="QPushButton" name="clear_plots_button">
+                 <property name="text">
+                  <string>Clear plots</string>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <widget class="QPushButton" name="compute_button">
+                 <property name="enabled">
+                  <bool>true</bool>
+                 </property>
+                 <property name="text">
+                  <string>Compute</string>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <widget class="QPushButton" name="restore_button">
+                 <property name="enabled">
+                  <bool>true</bool>
+                 </property>
+                 <property name="text">
+                  <string>Restore reference</string>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <widget class="QPushButton" name="apply_button">
+                 <property name="enabled">
+                  <bool>false</bool>
+                 </property>
+                 <property name="minimumSize">
+                  <size>
+                   <width>120</width>
+                   <height>0</height>
+                  </size>
+                 </property>
+                 <property name="styleSheet">
+                  <string notr="true">background-color: rgb(190, 45, 45); color: white;</string>
+                 </property>
+                 <property name="text">
+                  <string>Apply</string>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <widget class="QPushButton" name="stop_bump_button">
+                 <property name="enabled">
+                  <bool>false</bool>
+                 </property>
+                 <property name="minimumSize">
+                  <size>
+                   <width>110</width>
+                   <height>0</height>
+                  </size>
+                 </property>
+                 <property name="styleSheet">
+                  <string notr="true">background-color: rgb(40, 150, 70); color: white;</string>
+                 </property>
+                 <property name="text">
+                  <string>Stop bump</string>
+                 </property>
+                </widget>
+               </item>
+              </layout>
+             </widget>
+            </item>
+            <item>
+             <widget class="QGroupBox" name="correctorPreviewGroup">
+              <property name="title">
+               <string>Calculated corrector settings</string>
+              </property>
+              <layout class="QVBoxLayout" name="corrector_preview_layout">
+               <item>
+                <widget class="QTableWidget" name="corr_delta_table">
+                 <property name="toolTip">
+                  <string/>
+                 </property>
+                 <property name="editTriggers">
+                  <set>QAbstractItemView::NoEditTriggers</set>
+                 </property>
+                 <property name="alternatingRowColors">
+                  <bool>true</bool>
+                 </property>
+                 <column>
+                  <property name="text">
+                   <string>Corrector</string>
+                  </property>
+                 </column>
+                 <column>
+                  <property name="text">
+                   <string>Δθ</string>
+                  </property>
+                 </column>
+                 <column>
+                  <property name="text">
+                   <string>Reference</string>
+                  </property>
+                 </column>
+                 <column>
+                  <property name="text">
+                   <string>New setpoint</string>
+                  </property>
+                 </column>
+                </widget>
+               </item>
+              </layout>
+             </widget>
+            </item>
+           </layout>
+          </item>
+          <item>
+           <layout class="QVBoxLayout" name="right_layout" stretch="0,1,0,1,0">
+            <item>
+             <widget class="QLabel" name="desired_label">
+              <property name="text">
+               <string>Desired bump (drag to change)</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QWidget" name="desired_plot_widget" native="true">
+              <property name="minimumSize">
+               <size>
+                <width>470</width>
+                <height>245</height>
+               </size>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QLabel" name="result_label">
+              <property name="text">
+               <string>Desired / Predicted / Measured</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QWidget" name="result_plot_widget" native="true">
+              <property name="minimumSize">
+               <size>
+                <width>470</width>
+                <height>250</height>
+               </size>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <layout class="QHBoxLayout" name="actions_layout"/>
+            </item>
+           </layout>
+          </item>
+         </layout>
+        </item>
+       </layout>
+      </widget>
+     </widget>
+    </item>
+   </layout>
+  </widget>
+  <widget class="QStatusBar" name="statusbar"/>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

@@ -4,48 +4,35 @@ import time, os, re
 from Backend.LogConsole import LogConsole
 from datetime import datetime
 from Interfaces.AbstractMachineInterface import AbstractMachineInterface
+from Interfaces.ATF2.MagKi import load_mag_ki
 # from . import ipbsm_calc
 # from .knobs import KnobSystem
 class InterfaceATF2_Ext_RFTrack(AbstractMachineInterface):
-
-# For OTR0X:
-# emit x 5.2
-# beta x 6.305152438
-# alpha x -4.494292895
-
-# emit y 0.03
-# beta y 6.190329503
-# alpha y 2.576336962
-
-# For QD18X end:
-# emit x 5.2
-# beta x 1.105221776
-# alpha x -0.7752115812
-
-# emit y 0.03
-# beta y 10.34240856
-# alpha y -3.739163822
-
     def get_name(self):
         return 'ATF2_Ext_RFT'
 
-    def __init__(self, population=2e10, jitter=0.0, bpm_resolution=0.0, nsamples=1, nparticles=1000):
+    def __init__(self, population=2e10, bg_shots = 0.0,  jitter=0.0, bpm_resolution=0.0, nsamples=1, nparticles=1000):
         super().__init__()
+        self.sigmaCut = 2.0
         self.log = print
+        self.is_simulation = True
         #self.rng = np.random.default_rng(12345) # uncomment for jitter subtraction check
-        self.twiss_path = os.path.join(os.path.dirname(__file__), 'Ext_ATF2', 'ATF2_EXT_FF_v5.2.twiss')
+        #self.twiss_path = os.path.join(os.path.dirname(__file__), 'Ext_ATF2', 'ATF2_EXT_FF_v5.2.twiss')
+        self.twiss_path = os.path.join(os.path.dirname(__file__), 'Ext_ATF2', 'atf2_full_twiss.tfs')
         self.lattice = rft.Lattice(self.twiss_path)
+        self.lattice.set_tt_nsteps(0)
         self.lattice.set_bpm_resolution(bpm_resolution)
         for s in self.lattice['*OTR*']:
             screen = rft.Screen()
             screen.set_name(s.get_name())
             s.replace_with(screen)
         self.sequence = [e.get_name() for e in self.lattice['*']]
+
         self._attach_wake_data_to_elements(wake_scale=0,nsteps=20)
         self.bpms = [e.get_name() for e in self.lattice.get_bpms()]
         self.corrs = [e.get_name() for e in self.lattice.get_correctors()]
         self.screens = [e.get_name() for e in self.lattice.get_screens()]
-        self.quadrupoles = list(dict.fromkeys(e.get_name() for e in self.lattice.get_quadrupoles()))
+        self.quadrupoles = list(dict.fromkeys(self._original_quad_name(e.get_name()) for e in self.lattice.get_quadrupoles()))
         self.sextupoles = self._get_element_names_from_twiss_types({"SEXTUPOLE"})
         self.Pref = 1.2999999e3  # 1.3 GeV/c
         self.nparticles = nparticles
@@ -56,6 +43,7 @@ class InterfaceATF2_Ext_RFTrack(AbstractMachineInterface):
         self.Q = -1
         self.dfs_test_energy = 0.98
         self.wfs_test_charge = 0.90
+        self._beam_mode = "nominal"
         self.coupling_roll = 0.0
         self.__setup_beam0()
         self.__track_bunch()
@@ -64,6 +52,21 @@ class InterfaceATF2_Ext_RFTrack(AbstractMachineInterface):
         self.qmag_ydes = {name: 0.0 for name in self.quadrupoles}
         self.qmag_rolldes = {name: 0.0 for name in self.quadrupoles}
         #self.qm_list = [s for s in self.interface.get_sequence() if str(s).upper().startswith("Q")]
+        self.bg_shots = int(bg_shots)
+        self.machine_name = "ATF2"
+        self.lattice.align_elements()
+        '''Uncomment lines below to scatter elements in the lattice.
+            L.scatter_elements(type, dX, dY, dZ, roll, pitch, yaw, reference=’entrance’);
+        '''
+        #self.lattice.scatter_elements('quadrupole', 0, 0, 0, 0.100, 0, 0, 'center')
+        #self.lattice.scatter_elements('quadrupole', 0.100, 0.100, 0.100, 0, 0, 0, 'center')
+        #self.lattice.scatter_elements('quadrupole', 0.500, 0.500, 0, 0, 0, 0, 'center')
+        #self.lattice.scatter_elements('quadrupole', 0.500, 0.500, 0.500, 0, 0, 0, 'center')
+        #self.lattice.scatter_elements('bpm', 0.100, 0.100, 0, 0, 0, 0, 'center')
+
+        # for el in self._map_quadrupoles_names_from_lattice("QD18X"):
+        #                     # dx # dy #dz #roll #pitch #yaw
+        #     el.set_offsets(0.5, 0.5, 0.0, 5, 0.0, 0.0, "center")  # 0.5 mm dx, meters+radians
 
         # ----------------------------
         # Knobs (linear / nonlinear)
@@ -87,6 +90,29 @@ class InterfaceATF2_Ext_RFTrack(AbstractMachineInterface):
                           'QM12FF', 'QM11FF', 'QD10BFF', 'QD10AFF', 'QF9BFF', 'QF9AFF', 'QD8FF', 'QF7FF', 'QD6FF',
                           'QF5BFF', 'QF5AFF', 'QD4BFF', 'QD4AFF', 'QF3FF', 'QD2BFF', 'QD2AFF', 'QF1FF', 'QD0FF']
 
+
+    def _original_quad_name(self, name):
+        return re.sub(r"_[12]$", "", str(name))
+
+    def _give_elements_to_show_beamline(self, quad_selected):
+        mapped_quad_elements = self._map_quadrupoles_names_from_lattice(quad_selected)
+        if not isinstance(mapped_quad_elements, list):
+            mapped_quad_elements = [mapped_quad_elements]
+        start_quad_element_name = mapped_quad_elements[0]
+        return start_quad_element_name
+
+    def _map_quadrupoles_names_from_lattice(self, name):
+        name = str(name)
+        elements =  []
+        for quad_name in [name, f"{name}_1", f"{name}_2"]:
+            try:
+                quad_parts = self.lattice[quad_name]
+            except Exception as e:
+                continue
+            if not isinstance(quad_parts, list):
+                quad_parts = [quad_parts]
+            elements.extend(quad_parts) # adding each element of the list, not the whole list as an element
+        return elements
 
     def _get_element_names_from_twiss_types(self, allowed_types): # because rf track doesn't have get sextupoles
         with open(self.twiss_path, "r") as file:
@@ -136,7 +162,10 @@ class InterfaceATF2_Ext_RFTrack(AbstractMachineInterface):
     def get_beam_factors(self):
         gamma_rel = np.sqrt((self.Pref / self.electronmass) ** 2 + 1.0)
         beta_rel = np.sqrt(1.0 - 1.0 / gamma_rel ** 2)
-        return gamma_rel, beta_rel
+        beta_gamma = gamma_rel * beta_rel
+        if not np.isfinite(beta_gamma) or beta_gamma <= 0:
+            raise RuntimeError("Invalid beam factors")
+        return gamma_rel, beta_rel, beta_gamma
 
     def log_messages(self, console):
         self.log = console or print
@@ -152,7 +181,7 @@ class InterfaceATF2_Ext_RFTrack(AbstractMachineInterface):
         T.sigma_t = 8  # mm/c
         T.sigma_pt = 0.8  # permille
         # T_sigma_pt = 0.0001 # for test
-        self.B0 = rft.Bunch6d_QR(rft.electronmass, self.population, self.Q, self.Pref, T, self.nparticles)
+        self.B0 = rft.Bunch6d_QR(rft.electronmass, self.population, self.Q, self.Pref, T, self.nparticles, self.sigmaCut)
 
     def __setup_beam1(self):
         # Beam for DFS - Reduced energy
@@ -167,7 +196,7 @@ class InterfaceATF2_Ext_RFTrack(AbstractMachineInterface):
         T.sigma_t = 8  # mm/c
         T.sigma_pt = 0.8  # permille
         Nparticles = 1000  # number of macroparticles
-        self.B0 = rft.Bunch6d_QR(rft.electronmass, self.population, self.Q, Pref, T, self.nparticles)
+        self.B0 = rft.Bunch6d_QR(rft.electronmass, self.population, self.Q, Pref, T, self.nparticles, self.sigmaCut)
 
     def __setup_beam2(self):
         # Beam for WFS - Reduced bunch charge
@@ -182,7 +211,7 @@ class InterfaceATF2_Ext_RFTrack(AbstractMachineInterface):
         T.sigma_t = 8  # mm/c
         T.sigma_pt = 0.8  # permille
         Nparticles = 1000  # number of macroparticles
-        self.B0 = rft.Bunch6d_QR(rft.electronmass, population, self.Q, self.Pref, T, self.nparticles)
+        self.B0 = rft.Bunch6d_QR(rft.electronmass, population, self.Q, self.Pref, T, self.nparticles, self.sigmaCut)
 
     def __track_bunch(self):
         I0 = self.B0.get_info()
@@ -211,20 +240,24 @@ class InterfaceATF2_Ext_RFTrack(AbstractMachineInterface):
     def change_energy(self):
         self.__setup_beam1()
         self.__track_bunch()
+        self._beam_mode = "energy_changed"
         dP_P = self.dfs_test_energy - 1.0
         return dP_P
 
     def reset_energy(self):
         self.__setup_beam0()
         self.__track_bunch()
+        self._beam_mode = "nominal"
 
     def change_intensity(self):  # reduced charge
         self.__setup_beam2()
         self.__track_bunch()
+        self._beam_mode = "intensity_changed"
 
     def reset_intensity(self):
         self.__setup_beam0()
         self.__track_bunch()
+        self._beam_mode = "nominal"
 
     def get_sequence(self):
         return self.sequence
@@ -239,8 +272,14 @@ class InterfaceATF2_Ext_RFTrack(AbstractMachineInterface):
     def get_elements_indices(self, names):
         if isinstance(names, str):
             names = [names]
-        name_to_index = {string: index for index, string in enumerate(self.sequence)}
-        return [name_to_index.get(name, np.nan) for name in names]
+
+        name_to_index = {}
+        for index, element_name in enumerate(self.sequence):
+            name_to_index.setdefault(element_name, index)
+            if str(element_name).upper().startswith("Q"):
+                name_to_index.setdefault(self._original_quad_name(element_name), index)
+
+        return [name_to_index.get(str(name), np.nan) for name in names]
 
     def get_target_dispersion(self, names=None): # for DR too
         if names is None:
@@ -360,7 +399,7 @@ class InterfaceATF2_Ext_RFTrack(AbstractMachineInterface):
 
         return bpms
 
-    def get_screens(self, names=None, move_screen=True):
+    def get_screens(self, names=None):
         self.log('Reading screens...')
         if isinstance(names, str):
             names = [names]  # allows passing a single screen name
@@ -381,59 +420,22 @@ class InterfaceATF2_Ext_RFTrack(AbstractMachineInterface):
         screen_names = []
         s_list=[]
 
-        # get S positions of screens
-        with open(self.twiss_path, "r") as file:
-            lines = [line.strip() for line in file if line.strip()]
-
-        star_symbol = next(i for i, line in enumerate(lines) if line.startswith("*"))
-        dollar_sign = next(i for i, line in enumerate(lines) if line.startswith("$") and i > star_symbol)
-        columns = lines[star_symbol].lstrip("*").split()
-        try:
-            name_column = columns.index("NAME")
-            s_column = columns.index("S")
-        except ValueError as e:
-            raise RuntimeError("There are no such columns in the twiss file")
-
-        s_values = {}
-        for line in lines[dollar_sign + 1:]:
-            data = line.split()
-            if len(data) <= max(name_column, s_column):  # if a line has less column than needed, it is omitted
-                continue
-            screen_name = data[name_column].strip('"')
-            try:
-                s_values[screen_name] = (float(data[s_column]))
-            except ValueError:
-                continue
-
         for s in self.lattice.get_screens():
             screen_name = s.get_name()
             if names is not None and screen_name not in names:
                 continue
             screen_names.append(screen_name)
-            s_list.append(s_values.get(screen_name, np.nan))
+            s_list.append(float(s.get_S("exit")))
             hpixel_list.append(hpixel)
             vpixel_list.append(vpixel)
             m = s.get_bunch().get_phase_space('%x %y')
-            if m is None or len(m) == 0:  # empty bunch
-                xb_list.append(np.nan)
-                yb_list.append(np.nan)
-                sigx_list.append(np.nan)
-                sigy_list.append(np.nan)
-                sigxy_list.append(np.nan)
-                tilt_list.append(np.nan)
-                sum_list.append(0)
-                images.append(np.zeros((1, 1)))
-                hedges_all.append(np.array([0, hpixel]))
-                vedges_all.append(np.array([0, vpixel]))
-                continue
-
             sumw = len(m[:, 0])  # number of particles in the screen; intensity
-            x_mean = float(np.mean(m[:,0]))
-            y_mean = float(np.mean(m[:,1]))
-            x_centered = m[:,0] - x_mean
+            x_mean = float(np.mean(m[:,0])) # beam x centroid, mean position of particles
+            y_mean = float(np.mean(m[:,1])) # beam y centroid
+            x_centered = m[:,0] - x_mean # particles positions with respect to centroid
             y_centered = m[:,1] - y_mean
 
-            sigx = float(np.std(m[:, 0])) # RMS x beam size
+            sigx = float(np.std(m[:, 0])) # RMS x beam size, it tells us how much the particles are distributed around the centroid
             sigy = float(np.std(m[:, 1])) # RMS y beam size
             sigxy = float(np.mean(x_centered * y_centered))
             tilt = float(0.5 * np.arctan2(2.0 * sigxy, sigx ** 2 - sigy ** 2))  # ellipse angle
@@ -476,23 +478,23 @@ class InterfaceATF2_Ext_RFTrack(AbstractMachineInterface):
         bdes = np.zeros(len(self.quadrupoles), dtype=float)
 
         for i, quadrupole_name in enumerate(self.quadrupoles):
-            elements = self.lattice[quadrupole_name]
+            elements = self._map_quadrupoles_names_from_lattice(quadrupole_name)
             if not isinstance(elements, list):
                 elements = [elements]
 
-            k1_values = []
+            k1l_values = []
             for element in elements:
                 try:
-                    strength = element.get_K1(self.Pref / self.Q)
+                    strength = element.get_K1L(self.Pref / self.Q)*2
                 except Exception:
                     continue
                 if isinstance(strength, (list, tuple, np.ndarray)):
                     if len(strength) > 0:
-                        k1_values.append(float(strength[0]))
+                        k1l_values.append(float(strength[0]))
                 else:
-                    k1_values.append(float(strength))
+                    k1l_values.append(float(strength))
 
-            bdes[i] = k1_values[0] if k1_values else 0.0
+            bdes[i] = k1l_values[0] if k1l_values else 0.0
 
         quadrupoles = {"names": self.quadrupoles, "bdes": bdes, "bact": bdes.copy(),
                        "xdes": np.array([self.qmag_xdes.get(name, 0.0) for name in self.quadrupoles], dtype=float),
@@ -514,65 +516,45 @@ class InterfaceATF2_Ext_RFTrack(AbstractMachineInterface):
 
         return quadrupoles
 
-    def apply_qmag_xyroll(self, names, x_um, y_um, roll_m, wait=True, max_attempts=5, attempt_timeout=30.0, settle_dt=0.5, tol_um=15.0):
-        if isinstance(names, str):
-            names = [names]
-
-        nmag = len(names)
-
-        def _expand(values):
-            if np.isscalar(values):
-                return np.full(nmag, float(values), dtype=float)
-            arr = np.asarray(values, dtype=float).reshape(-1)
-            if arr.size != nmag:
-                raise ValueError(f"Length mismatch in apply_qmag_xyroll: expected {nmag}, got {arr.size}")
-            return arr
-
-        xs = _expand(x_um)
-        ys = _expand(y_um)
-        rolls = _expand(roll_m)
-
-        for name, x_target, y_target, roll_target in zip(names, xs, ys, rolls):
-            if name not in self.quadrupoles:
-                raise ValueError(f"Quadrupole {name} not found in RFTrack interface.")
-
-            elements = self.lattice[name]
-            if not isinstance(elements, list):
-                elements = [elements]
-
-            x_offset = float(x_target) * 1e-6
-            y_offset = float(y_target) * 1e-6
-            roll_rad = float(roll_target)
-            roll_mrad = roll_rad * 1e3
-
-            for element in elements:
-                element.set_offsets(x_offset, y_offset, 0.0, roll_mrad, 0.0, 0.0, "center")
-
-            self.qmag_xdes[name] = float(x_target)
-            self.qmag_ydes[name] = float(y_target)
-            self.qmag_rolldes[name] = float(roll_target)
-
-            print(
-                f"Simulated mover {name}: "
-                f"x={float(x_target):.3f} um, y={float(y_target):.3f} um, roll={float(roll_target):.6g} rad"
-            )
-
-        self.__track_bunch()
-
-    def set_quadrupoles(self, names, values_range, track = True):
+    def set_quadrupoles(self, names, values_range, track=True):
         if isinstance(names, str):
             names = [names]
         if not (isinstance(values_range, (list, tuple, np.ndarray))):
             values_range = [values_range]
         for quadrupole_name, value in zip(names, values_range):
-            elements = self.lattice[quadrupole_name]
+            elements = self._map_quadrupoles_names_from_lattice(quadrupole_name)
             if not isinstance(elements, (list)): elements = [elements]
             for element in elements:
-                element.set_K1(self.Pref / self.Q,float(value))
-
+                element.set_K1L(self.Pref / self.Q,float(value/2))
         if track:
-        # AS A TEST!
             self.__track_bunch()
+
+    def _mag_ki_name(self, name):
+        name = self._original_quad_name(str(name))
+        return name[1:] if name.startswith("M") else name
+
+    def _get_mag_ki(self):
+        if getattr(self, "mag_ki", None) is None:
+            self.mag_ki = load_mag_ki()
+        return self.mag_ki
+
+    def current_to_k1l(self, name, current_A):
+        current_A = float(current_A)
+        if not np.isfinite(current_A):
+            return np.nan
+        mag_ki = self._get_mag_ki()
+        if mag_ki is None:
+            raise KeyError(f"No A-K1 calibration for '{name}'")
+        return mag_ki.current_to_k1l(self._mag_ki_name(name), current_A, self.Pref / 1e3)
+
+    def k1l_to_current(self, name, k1):
+        k1 = float(k1)
+        if not np.isfinite(k1):
+            raise ValueError(f"Cannot convert K1 for quadrupole '{name}': {k1}")
+        mag_ki = self._get_mag_ki()
+        if mag_ki is None:
+            raise KeyError(f"No A-K1 calibration for '{name}'")
+        return mag_ki.k1l_to_current(self._mag_ki_name(name), k1, self.Pref / 1e3)
 
     def set_correctors(self, names, corr_vals):
         if isinstance(names, str):
@@ -596,29 +578,6 @@ class InterfaceATF2_Ext_RFTrack(AbstractMachineInterface):
                 self.lattice[corr].vary_strength(val / 10, 0.0)  # T*mm
             elif corr[:2] == "ZV":
                 self.lattice[corr].vary_strength(0.0, val / 10)  # T*mm
-        self.__track_bunch()
-
-
-    def vary_quadrupoles(self, names, delta_values):
-        if not isinstance(names, list):
-            names = [names]
-        if not isinstance(delta_values, (list, tuple, np.ndarray)):
-            delta_values = [delta_values]
-        for quadrupole_name, val in zip(names, delta_values):
-            elements = self.lattice[quadrupole_name]
-            if not isinstance(elements, list):
-                elements = [elements]
-            current_values=[]
-            for element in elements:
-                current=element.get_K1(self.Pref / self.Q)
-                current=float(current[0]) if isinstance(current, (list, tuple,np.ndarray)) else float(current)
-                current_values.append(current)
-            if len(current_values)>1 and not np.allclose(current_values, current_values[0], rtol=0.0, atol=1e-12):
-                self.log(f"Parts of quadrupole {quadrupole_name} have different values")
-            target_value=(current_values[0] if len(current_values)>0 else 0.0) +float(val)
-            for element in elements:
-                element.set_K1(self.Pref / self.Q,target_value)
-
         self.__track_bunch()
 
     def __load_wake_data(self,path,trans_or_long,scale=1):
@@ -695,21 +654,12 @@ class InterfaceATF2_Ext_RFTrack(AbstractMachineInterface):
         all_names = []
         all_s = []
         all_l = []
-        s_pos = 0.0
-
         for element in self.lattice['*']:
             element_name = element.get_name()
-            try:
-                element_length = float(element.get_length())
-            except Exception:
-                element_length = 0.0
-
             if names is None or element_name in names:
                 all_names.append(element_name)
-                all_s.append(s_pos)
-                all_l.append(element_length)
-
-            s_pos += element_length
+                all_s.append(float(element.get_S("entrance")))
+                all_l.append(float(element.get_length()))
 
         return {
             "names": all_names,
@@ -717,19 +667,24 @@ class InterfaceATF2_Ext_RFTrack(AbstractMachineInterface):
             "L": np.array(all_l, dtype=float),
         }
 
-    def align_everything(self):
-        self.lattice.align_elements()
-        self.__track_bunch()
+    def _get_elements_positions_show_beamline(self, names=None):
+        if isinstance(names, str):
+            names = [names]
 
-    def misalign_quadrupoles(self, sigma_x=0.100, sigma_y=0.100):
-        self.lattice.scatter_elements('quadrupole', sigma_x, sigma_y, 0, 0, 0, 0, 'center')
-        self.__track_bunch()
+        all_names = []
+        all_s = []
+        for element in self.lattice['*']:
+            element_name = element.get_name()
+            if names is None or element_name in names:
+                all_names.append(element_name)
+                all_s.append(float(element.get_S("entrance")))
 
-    def misalign_bpms(self, sigma_x=0.100, sigma_y=0.100):
-        self.lattice.scatter_elements('bpm', sigma_x, sigma_y, 0, 0, 0, 0, 'center')
-        self.__track_bunch()
+        return {
+            "names": all_names,
+            "S": np.array(all_s, dtype=float),
+        }
 
-    def _build_bunch_from_guesses(self, emit_x, emit_y, beta_x0, beta_y0, alpha_x0, alpha_y0):
+    def _build_bunch_from_guesses(self, emit_x, emit_y, beta_x0, beta_y0, alpha_x0, alpha_y0, energy_pref=None):
         T = rft.Bunch6d_twiss()
         T.emitt_x = float(emit_x)  # mm.mrad normalised emittance
         T.emitt_y = float(emit_y)  # mm.mrad
@@ -739,7 +694,8 @@ class InterfaceATF2_Ext_RFTrack(AbstractMachineInterface):
         T.alpha_y = float(alpha_y0)
         T.sigma_t = 8  # mm/c
         T.sigma_pt = 0.8  # permille
-        bunch = rft.Bunch6d_QR(rft.electronmass, self.population, self.Q, self.Pref, T, self.nparticles)
+        Pref = self.Pref if energy_pref is None else float(energy_pref)
+        bunch = rft.Bunch6d_QR(rft.electronmass, self.population, self.Q, Pref, T, self.nparticles, self.sigmaCut)
         return bunch
 
     def _read_tracked_bunch_screen_sigmas(self, screens):
@@ -755,78 +711,92 @@ class InterfaceATF2_Ext_RFTrack(AbstractMachineInterface):
             sigy[i] = float(screen_data["sigy"][idx])
         return sigx, sigy
 
-    def predict_emittance_scan_response(self, quad_name, screens, K1_values, emit_x, emit_y, beta_x0, beta_y0, alpha_x0, alpha_y0, stop_checker = None, reference_screen = None):
+    def _predict_scan_response_full(self, quad_name, screens, K1L_values, emit_x, emit_y, beta_x0, beta_y0, alpha_x0, alpha_y0, quad_dx0=None, quad_dy0=None, quad_roll=None, energy_pref = None, with_twiss=False, stop_checker=None, reference_screen=None):
         screens = list(screens)
-        K1_values = np.asarray(K1_values, dtype=float)
-        screens = list(screens)
-        if len(screens) == 0:
-            raise RuntimeError("No screens provided for emittance scan prediction.")
-        if reference_screen is None:
-            reference_screen = screens[0]
-        if reference_screen not in screens:
-            raise RuntimeError("reference_screen must be one of the selected screens.")
-
-        start_element_name = str(quad_name)
+        K1L_values = np.asarray(K1L_values, dtype=float)
+        if reference_screen is None: reference_screen = screens[0]
         end_element_name = str(screens[-1])
-
-        if quad_name not in self.quadrupoles:
-            raise ValueError(f"Quadrupole {quad_name} not found in quadrupoles")
-        if len(screens) == 0:
-            raise ValueError("No screens")
-
-        original_quads = self.get_quadrupoles(names=[quad_name])
-        if len(original_quads["bdes"]) == 0:
-            raise RuntimeError(f"Could not find original strength for quad {quad_name}")
-        K1_original = float(original_quads["bdes"][0])
-
         B0_original = self.B0
-        output_x = np.full((len(K1_values),len(screens)), np.nan, dtype=float)
-        output_y = np.full((len(K1_values),len(screens)), np.nan, dtype=float)
+        lattice_reference = self.lattice
+        self.lattice = lattice_reference.clone()
+        quad_elements = self._map_quadrupoles_names_from_lattice(quad_name)
+        if not isinstance(quad_elements, list):
+            quad_elements = [quad_elements]
+        start_element = quad_elements[0]
+
+        override_offsets = any(value is not None for value in (quad_dx0, quad_dy0, quad_roll))
+        dx = 0.0 if quad_dx0 is None else float(quad_dx0)
+        dy = 0.0 if quad_dy0 is None else float(quad_dy0)
+        roll = 0.0 if quad_roll is None else float(quad_roll)
+        nK1L, nscreens = len(K1L_values), len(screens)
+        sigma_x = np.full((nK1L, nscreens), np.nan, dtype=float)
+        sigma_y = np.full((nK1L, nscreens), np.nan, dtype=float)
+        x_mean = np.full((nK1L, nscreens), np.nan, dtype=float)
+        y_mean = np.full((nK1L, nscreens), np.nan, dtype=float)
+        sigma_xy = np.full((nK1L, nscreens), np.nan, dtype=float)
+        particles_xy = np.empty((nK1L, nscreens), dtype=object)
+        twiss_fields = ("emitt_x", "emitt_y", "beta_x", "beta_y", "alpha_x", "alpha_y")
+        twiss = {field: np.full((nK1L, nscreens), np.nan, dtype=float) for field in twiss_fields} if with_twiss else {}
 
         try:
-            for k,K1 in enumerate(K1_values):
+            if override_offsets:
+                for element in quad_elements:
+                    element.set_offsets(dx, dy, 0.0, roll, 0.0, 0.0, "center")
+            for k,K1L in enumerate(K1L_values):
                 if callable(stop_checker) and stop_checker():
                     raise RuntimeError("__OPTIMIZATION_STOP__")
-                self.set_quadrupoles([quad_name], [float(K1)], track = False)
-                start_element = self.lattice[start_element_name]
-                if isinstance(start_element, list):
-                    start_element = start_element[0]
+                self.set_quadrupoles([quad_name], [float(K1L)], track=False)
 
                 end_element = self.lattice[end_element_name]
                 if isinstance(end_element, list):
                     end_element = end_element[-1]
 
-                temp_bunch = self._build_bunch_from_guesses(
-                    emit_x=float(emit_x), emit_y=float(emit_y),
-                    beta_x0=float(beta_x0), beta_y0=float(beta_y0),
-                    alpha_x0=float(alpha_x0), alpha_y0=float(alpha_y0),
-                )
+                temp_bunch = self._build_bunch_from_guesses(emit_x=float(emit_x), emit_y=float(emit_y), beta_x0=float(beta_x0), beta_y0=float(beta_y0), alpha_x0=float(alpha_x0), alpha_y0=float(alpha_y0), energy_pref=energy_pref)
+                lattice_view = rft.Lattice_view(self.lattice, start_element, end_element)
+                tracked_to_last_screen = lattice_view.track(temp_bunch)
 
-                tracked_to_last_screen = self.lattice.track(temp_bunch, start_element, end_element)
                 for si, screen_name in enumerate(screens):
                     screen_elem = self.lattice[screen_name]
                     if isinstance(screen_elem, list):
                         screen_elem = screen_elem[-1]
-                    bunch_at_screen = None
-                    try:
-                        bunch_at_screen = screen_elem.get_bunch()
-                    except Exception:
-                        bunch_at_screen = None
+                    bunch_at_screen = screen_elem.get_bunch()
                     if bunch_at_screen is None and str(screen_name) == end_element_name:
                         bunch_at_screen = tracked_to_last_screen
-                    if bunch_at_screen is None:
-                        continue
                     m = bunch_at_screen.get_phase_space('%x %y')
+                    particles_xy[k, si] = (m[:, 0].copy(), m[:, 1].copy())
                     if m is not None and len(m) > 0:
-                        output_x[k, si] = float(np.std(m[:, 0]))
-                        output_y[k, si] = float(np.std(m[:, 1]))
+                        xs = m[:, 0]
+                        ys = m[:, 1]
+                        xm = float(np.mean(xs))
+                        ym = float(np.mean(ys))
+                        sigma_x[k, si] = float(np.std(xs))
+                        sigma_y[k, si] = float(np.std(ys))
+                        x_mean[k, si] = xm
+                        y_mean[k, si] = ym
+                        sigma_xy[k, si] = float(np.mean((xs - xm) * (ys - ym))) # covariance
+                        if with_twiss:
+                            info = bunch_at_screen.get_info()
+                            for field in twiss_fields:
+                                twiss[field][k, si] = float(getattr(info, field, np.nan))
 
         finally:
-            self.set_quadrupoles([quad_name], [float(K1_original)], track=False)
+            self.lattice = lattice_reference
             self.B0 = B0_original
             self.__track_bunch()
 
-        return output_x, output_y
+        return {
+            "sigma_x": sigma_x, "sigma_y": sigma_y,
+            "x_mean": x_mean, "y_mean": y_mean,
+            "sigma_xy": sigma_xy, "particles_xy": particles_xy,
+            **twiss,
+        }
+
+    def predict_emittance_scan_response(self, quad_name, screens, K1L_values, emit_x, emit_y, beta_x0, beta_y0, alpha_x0, alpha_y0, stop_checker = None, reference_screen = None):
+        full = self._predict_scan_response_full(quad_name, screens, K1L_values, emit_x, emit_y, beta_x0, beta_y0, alpha_x0, alpha_y0, stop_checker=stop_checker, reference_screen=reference_screen)
+        return full["sigma_x"], full["sigma_y"]
+
+    def predict_emittance_scan_response_full(self, quad_name, screens, K1L_values, emit_x, emit_y, beta_x0, beta_y0, alpha_x0, alpha_y0, quad_dx0=None, quad_dy0=None, quad_roll=None, energy_pref = None, with_twiss=False, stop_checker=None, reference_screen=None):
+        return self._predict_scan_response_full(quad_name, screens, K1L_values, emit_x, emit_y, beta_x0, beta_y0, alpha_x0, alpha_y0, quad_dx0=quad_dx0, quad_dy0=quad_dy0, quad_roll=quad_roll, energy_pref = energy_pref, with_twiss=with_twiss, stop_checker=stop_checker, reference_screen=reference_screen)
 
     def get_twiss_at_screen(self, name): # for printing emittance after bba using rft interface, can be deleted later
         if name not in self.screens:
@@ -1001,17 +971,122 @@ class InterfaceATF2_Ext_RFTrack(AbstractMachineInterface):
 
         return result
 
+    def get_R_matrix_scan(self, quad_name, screens, K1L_values):
+        screens = list(screens)
+        K1L_values = np.asarray(K1L_values, dtype=float)
+        original_quads = self.get_quadrupoles(names=[quad_name])
+        K1L_original = float(original_quads["bdes"][0])
+        end_element_name = str(screens[-1])
+
+        n_k1l = len(K1L_values)
+        n_screens = len(screens)
+        R11 = np.full((n_k1l, n_screens), np.nan, dtype=float)
+        R12 = np.full((n_k1l, n_screens), np.nan, dtype=float)
+        R33 = np.full((n_k1l, n_screens), np.nan, dtype=float)
+        R34 = np.full((n_k1l, n_screens), np.nan, dtype=float)
+
+        original_bunch = self.B0
+        try:
+            for k, K1L in enumerate(K1L_values):
+                self.set_quadrupoles([quad_name], [float(K1L)], track=False)
+                start_elements = self._map_quadrupoles_names_from_lattice(quad_name)
+                start_element = start_elements[0]
+                if isinstance(start_element, list):
+                    start_element = start_element[0]
+                end_element = self.lattice[end_element_name]
+                if isinstance(end_element, list):
+                    end_element = end_element[-1]
+
+                bx = np.array([[1.0, 0.0, 0.0, 0.0, 0.0, self.Pref], # x = 1 ,  x' = 0
+                               [0.0, 1.0, 0.0, 0.0, 0.0, self.Pref]], dtype=float) # x = 0, x' = 1
+                bunch_x = rft.Bunch6d(rft.electronmass, 0.0, self.Q, bx)
+                tracked_x = rft.Lattice_view(self.lattice, start_element, end_element).track(bunch_x)
+
+                for si, screen_name in enumerate(screens):
+                    screen_elem = self.lattice[screen_name]
+                    if isinstance(screen_elem, list):
+                        screen_elem = screen_elem[-1]
+                    b_x = screen_elem.get_bunch() # reads screens after tracking
+                    if b_x is None and str(screen_name) == end_element_name: b_x = tracked_x
+                    phase_space_x = np.asarray(b_x.get_phase_space("%x %xp"), dtype=float)
+                    R11[k, si] = phase_space_x[0, 0] # R11[2,1] - > 3rd K1L, 2nd screen
+                    R12[k, si] = phase_space_x[1, 0]
+
+                by = np.array([[0.0, 0.0, 1.0, 0.0, 0.0, self.Pref], [0.0, 0.0, 0.0, 1.0, 0.0, self.Pref]], dtype=float)
+                bunch_y = rft.Bunch6d(rft.electronmass, 0.0, self.Q, by)
+                tracked_y = rft.Lattice_view(self.lattice, start_element, end_element).track(bunch_y)
+
+                for si, screen_name in enumerate(screens):
+                    screen_elem = self.lattice[screen_name]
+                    if isinstance(screen_elem, list):
+                        screen_elem = screen_elem[-1]
+                    b_y = screen_elem.get_bunch()
+                    if b_y is None and str(screen_name) == end_element_name: b_y = tracked_y
+                    phase_space_y = np.asarray(b_y.get_phase_space("%y %yp"), dtype=float)
+                    R33[k, si] = phase_space_y[0, 0]
+                    R34[k, si] = phase_space_y[1, 0]
+        finally:
+            self.set_quadrupoles([quad_name], [float(K1L_original)], track=False)
+            self.B0 = original_bunch
+            self.__track_bunch()
+
+        return {"R11": R11, "R12": R12, "R33": R33, "R34": R34, "screens": screens, "K1L_values": K1L_values}
+
 
     '''
     SATO-SAN'S METHODS:
     '''
+
+    def apply_qmag_xyroll(self, names, x_um, y_um, roll_m, wait=True, max_attempts=5, attempt_timeout=30.0, settle_dt=0.5, tol_um=15.0):
+        if isinstance(names, str):
+            names = [names]
+
+        nmag = len(names)
+
+        def _expand(values):
+            if np.isscalar(values):
+                return np.full(nmag, float(values), dtype=float)
+            arr = np.asarray(values, dtype=float).reshape(-1)
+            if arr.size != nmag:
+                raise ValueError(f"Length mismatch in apply_qmag_xyroll: expected {nmag}, got {arr.size}")
+            return arr
+
+        xs = _expand(x_um)
+        ys = _expand(y_um)
+        rolls = _expand(roll_m)
+
+        for name, x_target, y_target, roll_target in zip(names, xs, ys, rolls):
+            if name not in self.quadrupoles:
+                raise ValueError(f"Quadrupole {name} not found in RFTrack interface.")
+
+            elements = self._map_quadrupoles_names_from_lattice(name)
+            if not isinstance(elements, list):
+                elements = [elements]
+
+            x_offset = float(x_target) * 1e-6
+            y_offset = float(y_target) * 1e-6
+            roll_rad = float(roll_target)
+            roll_mrad = roll_rad * 1e3
+
+            for element in elements:
+                element.set_offsets(x_offset, y_offset, 0.0, roll_mrad, 0.0, 0.0, "center")
+
+            self.qmag_xdes[name] = float(x_target)
+            self.qmag_ydes[name] = float(y_target)
+            self.qmag_rolldes[name] = float(roll_target)
+
+            print(
+                f"Simulated mover {name}: "
+                f"x={float(x_target):.3f} um, y={float(y_target):.3f} um, roll={float(roll_target):.6g} rad"
+            )
+
+        self.__track_bunch()
 
     # ----------------------------
     # Knobs (linear / nonlinear)
     # ----------------------------
     def get_linear_knob_names(self):
         return list(self.knobs.linear_matrix.keys())
-
 
     def get_nonlinear_knob_names(self):
         return list(self.knobs.nonlinear_matrix.keys())
@@ -1112,7 +1187,6 @@ class InterfaceATF2_Ext_RFTrack(AbstractMachineInterface):
         bpms = self.lattice["M" + name]
         if not isinstance(bpms, (list, tuple)):
             bpms = [bpms]
-
         for elem in elems:
             if add == True:
                 x = elem.get_offsets()[0][0]  # mm
@@ -1132,35 +1206,6 @@ class InterfaceATF2_Ext_RFTrack(AbstractMachineInterface):
             else:
                 bpm.set_offsets(dx * 1e-6, dy * 1e-6, 0)
 
-    """
-    def measure_dispersion(self):
-        print("Measuring dispersion (RF-Track)...")
-
-        # Nominal energy
-        self.__setup_beam0()
-        self.__track_bunch()
-        bpms0 = self.get_bpms()
-        x0 = np.mean(bpms0["x"], axis=0)
-        y0 = np.mean(bpms0["y"], axis=0)
-
-        # Reduced energy
-        self.__setup_beam1()
-        self.__track_bunch()
-        bpms1 = self.get_bpms()
-        x1 = np.mean(bpms1["x"], axis=0)
-        y1 = np.mean(bpms1["y"], axis=0)
-
-        # Restore nominal
-        self.__setup_beam0()
-        self.__track_bunch()
-
-        delta = -0.02  # Pref -> 0.98 * Pref
-        eta_x = (x1 - x0) / delta
-        eta_y = (y1 - y0) / delta
-
-        return {"eta_x": eta_x, "eta_y": eta_y}
-    """
-
     def __ensure_tracked(self):
         if getattr(self, "_needs_tracking", False):
             self.__track_bunch()
@@ -1175,95 +1220,3 @@ class InterfaceATF2_Ext_RFTrack(AbstractMachineInterface):
         if name not in self.kl_per_A:
             raise KeyError(f"kl_per_A is not defined for corrector '{name}'")
         return np.asarray(kl, dtype=float) / self.kl_per_A[name]
-
-    '''
-    to be considered later:
-    
-        def _build_lattice(self):
-        self.lattice = rft.Lattice(self.twiss_path)
-        Scr = rft.Screen()
-        self.lattice['IP'].replace_with(Scr)
-        self.lattice.set_bpm_resolution(self.bpm_resolution)
-
-        self.sequence = [e.get_name() for e in self.lattice["*"]]
-        self.bpms = [e.get_name() for e in self.lattice.get_bpms()]
-        self.corrs = [e.get_name() for e in self.lattice.get_correctors()]
-
-        self.__setup_beam0()
-        self.__track_bunch()
-        
-        
-    def get_bpms(self):
-        self.log("Reading bpms...")
-        self.__ensure_tracked()
-
-        nbpm = len(self.bpms)
-
-        x = np.zeros((self.nsamples, nbpm))
-        y = np.zeros_like(x)
-        tmit = np.zeros_like(x)
-
-        # s1 = np.array([self.lattice[bpm].get_S() for bpm in self.bpms])
-        s = np.array([self.lattice[bpm].get_S() for bpm in self.bpms], dtype=float)
-
-        for i in range(self.nsamples):
-            for j, bpm in enumerate(self.bpms):
-                b = self.lattice[bpm]
-                reading = b.get_reading()
-                x[i, j] = reading[0]
-                y[i, j] = reading[1]
-                tmit[i, j] = b.get_total_charge()
-
-        return {
-            "names": self.bpms,
-            "x": x,
-            "y": y,
-            "tmit": tmit,
-            "S": s,
-        }
-        
-    def set_correctors(self, names, corr_vals):
-        if isinstance(names, str):
-            names = [names]
-        if np.isscalar(corr_vals):
-            corr_vals = [corr_vals] * len(names)
-        elif not isinstance(corr_vals, (list, tuple, np.ndarray)):
-            corr_vals = [corr_vals]
-        if len(names) != len(corr_vals):
-            self.log('Error: len(names) != len(corr_vals) in set_correctors(names, corr_vals)')
-            return
-        for corr, val in zip(names, corr_vals):
-            if corr not in self.kl_per_A:
-                self.log(f'Warning: missing kl_per_A for {corr}; skipping.')
-                continue
-            strength = float(val) * self.kl_per_A[corr] * 1000  # A -> T*mm
-            if corr[:2] == "ZH" or corr[:2] == "ZX":
-                self.lattice[corr].set_strength(strength, 0.0)
-            elif corr[:2] == "ZV":
-                self.lattice[corr].set_strength(0.0, strength)
-
-        self.__track_bunch()
-    
-    
-        def vary_correctors(self, names, corr_vals):
-        if isinstance(names, str):
-            names = [names]
-        if np.isscalar(corr_vals):
-            corr_vals = [corr_vals] * len(names)
-        elif not isinstance(corr_vals, (list, tuple, np.ndarray)):
-            corr_vals = [corr_vals]
-        if len(names) != len(corr_vals):
-            self.log('Error: len(names) != len(corr_vals) in vary_correctors(names, corr_vals)')
-            return
-        for corr, val in zip(names, corr_vals):
-            if corr not in self.kl_per_A:
-                self.log(f'Warning: missing kl_per_A for {corr}; skipping.')
-                continue
-            delta_strength = float(val) * self.kl_per_A[corr] * 1000  # A -> T*mm
-            if corr[:2] == "ZH" or corr[:2] == "ZX":
-                self.lattice[corr].vary_strength(delta_strength, 0.0)
-            elif corr[:2] == "ZV":
-                self.lattice[corr].vary_strength(0.0, delta_strength)
-        self.__track_bunch()
-        #self._needs_tracking = True 
-    '''

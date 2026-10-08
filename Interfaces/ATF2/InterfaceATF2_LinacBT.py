@@ -21,10 +21,7 @@ class InterfaceATF2_LinacBT(InterfaceATF2_Linac):
 
     def __init__(self, nsamples=1):
         super().__init__(nsamples=nsamples)
-        self.sequence, self.bpms, self.corrs, self.bpm_indexes = _build_beamline(
-            sequence=BT_SEQUENCE,
-            monitors=self.monitors,
-        )
+        self.sequence, self.bpms, self.corrs, self.bpm_indexes = _build_beamline(sequence=BT_SEQUENCE, monitors=self.monitors)
 
     def get_hcorrectors_names(self):
         return [string for string in self.corrs if string.lower().startswith(('zh', 'zx'))]

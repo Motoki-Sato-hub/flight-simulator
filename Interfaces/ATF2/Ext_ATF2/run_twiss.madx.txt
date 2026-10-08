@@ -1,0 +1,8 @@
+call, file=elements.madx;
+call, file=variables.madx;
+
+beam, sequence=ATF2, particle=electron, energy=1.3;
+use, sequence=ATF2;
+
+select, flag=twiss, full;
+twiss, beta0=initial, file=atf2_full_twiss.tfs;

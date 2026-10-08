@@ -4,10 +4,10 @@ RMSE - root mean squared error
 R2 - score of fit quality. Best is 1.0
 
 The model learns:
-[emitx_norm, beta_x0, alpha_x0, emit_y_norm, beta_y0, alpha_y0, K1]
+[emitx_norm, beta_x0, alpha_x0, emit_y_norm, beta_y0, alpha_y0, K1L]
 ->
-[sigx2_OTR0X, sigx2_OTR1X, sigx2_OTR2X, sigx2_OTR3X,
-sigy2_OTR0X, sigy2_OTR1X, sigy2_OTR2X, sigy2_OTR3X]
+[sigx_OTR0X, sigx_OTR1X, sigx_OTR2X, sigx_OTR3X,
+sigy_OTR0X, sigy_OTR1X, sigy_OTR2X, sigy_OTR3X]
 
 '''
 
@@ -23,24 +23,24 @@ from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 
 def screens_folder_name(screens):
-    screens = [str(screen).strip() for screen in (screens or []) if str(screen).strip()]
-    if not screens:
+    #screens = [str(screen).strip() for screen in (screens or []) if str(screen).strip()]
+    #if not screens:
         return "all_screens"
-    return "_".join(screens)
+    #return "_".join(screens)
 
 def get_ml_model_file(machine_name, quad_name, screens):
     current_file = Path(__file__).resolve()
     project_root = current_file.parents[1]
     if str(project_root) not in sys.path:
         sys.path.insert(0, str(project_root))
-    return project_root / "MachineLearning" / str(machine_name) / str(quad_name) / screens_folder_name(screens) / "EM_model_100k.pt"
+    return project_root / "MachineLearning" / str(machine_name) / str(quad_name) / screens_folder_name(screens) / "EM_model.pt"
 
 def get_ml_dataset_file(machine_name, quad_name, screens):
     current_file = Path(__file__).resolve()
     project_root = current_file.parents[1]
     if str(project_root) not in sys.path:
         sys.path.insert(0, str(project_root))
-    return project_root / "MachineLearning" / str(machine_name) / str(quad_name) / screens_folder_name(screens) / "EM_dataset_100k.npz"
+    return project_root / "MachineLearning" / str(machine_name) / str(quad_name) / screens_folder_name(screens) / "EM_dataset.npz"
 
 try:
     torch.set_num_threads(1)
@@ -48,18 +48,20 @@ except Exception:
     pass
 
 class NeuralNetwork(nn.Module):
+
     def __init__(self, n_inputs, n_outputs):
         super().__init__()
         self.net = nn.Sequential(
-            nn.Linear(n_inputs, 256),
-            nn.LayerNorm(256),
+            nn.Linear(n_inputs, 128),
+            nn.LayerNorm(128),
             nn.SiLU(),
-            nn.Linear(256, 256),
+            nn.Dropout(0.05),
+            nn.Linear(128, 128),
             nn.SiLU(),
-            nn.Linear(256, 128),
-            nn.SiLU(),
+            nn.Dropout(0.05),
             nn.Linear(128, 64),
             nn.SiLU(),
+            #nn.Dropout(0.05),
             nn.Linear(64, n_outputs),
         )
 
@@ -84,8 +86,8 @@ class TrainModel:
         self.batch_size = 256 # packets with 128 samples at the same time
         self.max_epochs = 2000 # maximum numbers of iterations though the dataset
         self.learning_rate = 1e-3 # size of a step during learning
-        self.weight_decay = 1e-5 # small penalty for too big weights of a neural network
-        self.patience = 120 # if through 120 epochs result doesn't get better, triggers early stopping
+        self.weight_decay = 1e-3 # small penalty for too big weights of a neural network
+        self.patience = 30 # if through 120 epochs result doesn't get better, triggers early stopping
         self.log_callback = log_callback
         self.progress_callback = progress_callback
         self.stop_checker = stop_checker
@@ -94,6 +96,7 @@ class TrainModel:
         self.y_scaler = None
         self.param_names = []
         self.sigma_names = []
+        self.target_observable = "sigma"
         self.metrics = {}
         self.sample_groups=None
 
@@ -137,14 +140,17 @@ class TrainModel:
             self.param_names = [str(v) for v in data["param_names"]]
         if "sigma_names" in data:
             self.sigma_names = [str(v) for v in data["sigma_names"]]
+        self.target_observable = str(data["target_observable"].item()) if "target_observable" in data.files else "sigma2"
+        if self.target_observable not in {"sigma", "sigma2"}:
+            raise RuntimeError(f"Unsupported ML dataset target: {self.target_observable}")
         if "screens" in data:
             self.screens = [str(v) for v in data["screens"]]
         if "quad_name" in data:
             self.quad_name = str(data["quad_name"])
 
         finite = np.all(np.isfinite(X), axis=1) & np.all(np.isfinite(Y), axis=1) # deletes samples with nan, -inf, +inf
-        n_k1_per_twiss_set = int(np.asarray(data["n_k1_per_twiss_set"]).item())
-        groups = np.arange(X.shape[0],dtype = int) // max(1, n_k1_per_twiss_set)
+        n_k1l_per_twiss_set = 7
+        groups = np.arange(X.shape[0],dtype = int) // max(1, n_k1l_per_twiss_set)
         X = X[finite]
         Y = Y[finite]
         self.sample_groups = groups[finite]
@@ -173,9 +179,11 @@ class TrainModel:
         self.y_scaler = StandardScaler()
         X_train = self.x_scaler.fit_transform(X_train_raw)
         X_test = self.x_scaler.transform(X_test_raw)
-        Y_train = self.y_scaler.fit_transform(Y_train_raw)
-        Y_test = self.y_scaler.transform(Y_test_raw)
-
+        Y_train_log = np.log(np.maximum(Y_train_raw, 1e-30))
+        Y_test_log = np.log(np.maximum(Y_test_raw, 1e-30))
+        self.y_scaler = StandardScaler()
+        Y_train = self.y_scaler.fit_transform(Y_train_log)
+        Y_test = self.y_scaler.transform(Y_test_log)
         device = self.get_device()
         self.model = NeuralNetwork(X_train.shape[1], Y_train.shape[1]).float().to(device) # chooses gpu or cpu
                                                                                     # X_train.shape[1] = 7
@@ -300,7 +308,10 @@ class TrainModel:
             raise RuntimeError(
                 f"ML model returned NaN or Inf. Y_scaled.shape={Y_scaled.shape}, Model file={self.model_file}."
             )
-        return self.y_scaler.inverse_transform(Y_scaled) # unscales
+        Y_log = self.y_scaler.inverse_transform(Y_scaled) # unscales
+        Y = np.exp(Y_log)
+
+        return Y
 
     def save_model(self):
         if self.model is None or self.x_scaler is None or self.y_scaler is None:
@@ -316,6 +327,7 @@ class TrainModel:
             "y_scale": self.y_scaler.scale_,
             "param_names": self.param_names,
             "sigma_names": self.sigma_names,
+            "target_observable": self.target_observable,
             "screens": self.screens,
             "quad_name": self.quad_name,
             "machine_name": self.machine_name,
@@ -345,6 +357,9 @@ class TrainModel:
 
         self.param_names = [str(v) for v in checkpoint.get("param_names", [])]
         self.sigma_names = [str(v) for v in checkpoint.get("sigma_names", [])]
+        self.target_observable = str(checkpoint.get("target_observable", "sigma2"))
+        if self.target_observable not in {"sigma", "sigma2"}:
+            raise RuntimeError(f"Unsupported ML model target: {self.target_observable}")
         self.screens = [str(v) for v in checkpoint.get("screens", self.screens)]
         self.quad_name = str(checkpoint.get("quad_name", self.quad_name))
         self.machine_name = str(checkpoint.get("machine_name", self.machine_name))
@@ -360,6 +375,10 @@ class MLInterface:
         self.model_file = get_ml_model_file(self.machine_name, self.quad_name, self.screens)
         self.trainer = TrainModel(screens=self.screens, quad_name=self.quad_name, machine_name=self.machine_name, model_file=self.model_file)
         self.trainer.load_model()
+        if self.trainer.target_observable == "sigma2":
+            print(f"Legacy ML model predicts sigma^2; retrain {self.model_file} to use direct sigma predictions.")
+
+        self._screen_indices = [self.trainer.screens.index(screen) for screen in self.screens]
 
     def __getattr__(self, name):
         return getattr(self.interface, name) # if there is a function that MLInterface doesn't have (almost all of them), it gets them form the
@@ -376,7 +395,7 @@ class MLInterface:
             )
         return self.trainer.predict_array(X)
 
-    def predict_emittance_scan_response(self, quad_name, screens, K1_values, emit_x, emit_y, beta_x0, beta_y0, alpha_x0, alpha_y0, reference_screen = None, stop_checker = None):
+    def predict_emittance_scan_response(self, quad_name, screens, K1L_values, emit_x, emit_y, beta_x0, beta_y0, alpha_x0, alpha_y0, reference_screen = None, stop_checker = None):
 
         if callable(stop_checker) and stop_checker():
             raise RuntimeError("__OPTIMIZATION_STOP__")
@@ -389,29 +408,26 @@ class MLInterface:
 
         X = []
 
-        for K1 in K1_values:
-            X.append([emit_x, beta_x0, alpha_x0, emit_y, beta_y0, alpha_y0, K1])
+        for K1L in K1L_values:
+            X.append([emit_x, beta_x0, alpha_x0, emit_y, beta_y0, alpha_y0, K1L])
             # scan_points * 7
 
         X = np.asarray(X, dtype=float)
         Y = self.predict_array(X) # pytorch model
-        n_screens = len(screens)
+        n_trained_screens = len(self.trainer.screens)
 
-        if Y.shape[1] != 2*n_screens:
+        if Y.shape[1] != 2*n_trained_screens:
             raise RuntimeError(f"ML model output has wrong size.")
 
-        prediction_sigx = Y[:, :n_screens]
-        prediction_sigy = Y[:, n_screens:]
+        # Y holds predictions for every trained screen; pick out only the requested ones, in order.
+        prediction_sigx = Y[:, :n_trained_screens][:, self._screen_indices]
+        prediction_sigy = Y[:, n_trained_screens:][:, self._screen_indices]
 
-        prediction_sigx = np.sqrt(np.maximum(prediction_sigx, 0.0)) # cuts values that are negative to 0.0
-        prediction_sigy = np.sqrt(np.maximum(prediction_sigy, 0.0)) # element for element, checks if negative
+        if self.trainer.target_observable == "sigma2":
+            prediction_sigx = np.sqrt(np.maximum(prediction_sigx, 0.0))
+            prediction_sigy = np.sqrt(np.maximum(prediction_sigy, 0.0))
+        else:
+            prediction_sigx = np.maximum(prediction_sigx, 0.0)
+            prediction_sigy = np.maximum(prediction_sigy, 0.0)
 
         return prediction_sigx, prediction_sigy
-
-if __name__ == "__main__":
-    trainer = TrainModel(
-        machine_name="ATF2",
-        quad_name="QD18X",
-        screens=["OTR0X", "OTR1X", "OTR2X", "OTR3X"],
-    )
-    trainer.train()

@@ -190,9 +190,6 @@ class QM_mode_helpers:
             self._hist_wake_x.clear()
             self._hist_wake_y.clear()
             self._hist_wake.clear()
-            self._hist_abs_rms_x.clear()
-            self._hist_abs_rms_y.clear()
-            self._hist_abs_rms_xy.clear()
             self._refresh_metric_plots_for_mode()
 
         w1, w2, w3, rcond, iters, gain, beta = self._read_params()
@@ -261,22 +258,6 @@ class QM_mode_helpers:
             state = self.interface.get_state()
             state = self._apply_jitter_subtraction_to_state(state)
             orbit = state.get_orbit(bpms)
-
-            bpms_qm = state.get_bpms(bpms)
-
-            x_vals = np.asarray(bpms_qm['x'], dtype=float)
-            y_vals = np.asarray(bpms_qm['y'], dtype=float)
-
-            mean_x = np.mean(x_vals, axis=0) if x_vals.ndim == 2 else x_vals
-            mean_y = np.mean(y_vals, axis=0) if y_vals.ndim == 2 else y_vals
-
-            orbit_rms_x = float(np.sqrt(np.mean(mean_x ** 2)))
-            orbit_rms_y = float(np.sqrt(np.mean(mean_y ** 2)))
-            orbit_rms_xy = float(np.sqrt(np.mean(mean_x ** 2 + mean_y ** 2)))
-
-            self._hist_abs_rms_x.append(orbit_rms_x)
-            self._hist_abs_rms_y.append(orbit_rms_y)
-            self._hist_abs_rms_xy.append(orbit_rms_xy)
 
             O0x = np.asarray(orbit["x"], dtype=float).reshape(-1, 1)
             O0y = np.asarray(orbit["y"], dtype=float).reshape(-1, 1)
@@ -362,51 +343,8 @@ class QM_mode_helpers:
 
             self._plot_series(ax=self.traj_ax, canvas=self.traj_canvas, values_x=self._hist_orbit_x, values_y=self._hist_orbit_y, vals=self._hist_orbit, title="QM - distance from initial trajectory")
 
-            if not hasattr(self, "rms_orbits_data") or self.rms_orbits_data is None:
-                self.rms_orbits_data = {}
-
-            self.rms_orbits_data = {
-                "selected_bpms": list(bpms),
-                "start_x": np.asarray(x_vals, dtype=float) if it == 0 else self.rms_orbits_data.get("start_x"),
-                "start_y": np.asarray(y_vals, dtype=float) if it == 0 else self.rms_orbits_data.get("start_y"),
-                "current_x": np.asarray(x_vals, dtype=float),
-                "current_y": np.asarray(y_vals, dtype=float),
-                "final_x": self.rms_orbits_data.get("final_x"),
-                "final_y": self.rms_orbits_data.get("final_y"),
-                "x1_vals": None,
-                "y1_vals": None,
-                "x2_vals": None,
-                "y2_vals": None,
-                "nominal_x": None,
-                "nominal_y": None,
-            }
-
-            if self.nominal_state is not None:
-                nominal_bpms = self.nominal_state.get_bpms(bpms)
-                self.rms_orbits_data["nominal_x"] = np.asarray(nominal_bpms["x"], dtype=float)
-                self.rms_orbits_data["nominal_y"] = np.asarray(nominal_bpms["y"], dtype=float)
-
             QApplication.processEvents()
 
-        final_state = self.interface.get_state()
-        final_state = self._apply_jitter_subtraction_to_state(final_state)
-        final_bpms = final_state.get_bpms(bpms)
-        final_x_vals = np.asarray(final_bpms["x"], dtype=float)
-        final_y_vals = np.asarray(final_bpms["y"], dtype=float)
-
-        if not hasattr(self, "rms_orbits_data") or self.rms_orbits_data is None:
-            self.rms_orbits_data = {"selected_bpms": list(bpms)}
-        self.rms_orbits_data["final_x"] = final_x_vals
-        self.rms_orbits_data["final_y"] = final_y_vals
-
-        mean_final_x = np.nanmean(final_x_vals, axis=0) if final_x_vals.ndim == 2 else final_x_vals
-        mean_final_y = np.nanmean(final_y_vals, axis=0) if final_y_vals.ndim == 2 else final_y_vals
-        final_rms_x = float(np.sqrt(np.nanmean(mean_final_x ** 2)))
-        final_rms_y = float(np.sqrt(np.nanmean(mean_final_y ** 2)))
-        final_rms_xy = float(np.sqrt(np.nanmean(mean_final_x ** 2 + mean_final_y ** 2)))
-        self._hist_abs_rms_x.append(final_rms_x)
-        self._hist_abs_rms_y.append(final_rms_y)
-        self._hist_abs_rms_xy.append(final_rms_xy)
         if not silent:
             self.save_session_settings_qm_correction(w1=w1, w2=w2, w3=w3, specific_bpm=spec_bpm, rcond=rcond, iters=iters, gain=gain, beta=beta, max_horizontal_range=max_x, max_vertical_range=max_y, is_triangular=bool(self.triangular_checkbox.isChecked()), bpm_weights=self.bpm_weights, response=response, is_jitter_subtraction_checked=bool(self.subtract_jitter_checkbox.isChecked()))
             QMessageBox.information(self, "QM correction", "QM correction finished")

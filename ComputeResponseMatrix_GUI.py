@@ -1,5 +1,6 @@
 from Backend.State import State
 from Backend.Response import Response
+import pprint
 from Backend.ResponseMatrix_DFS_WFS import ResponseMatrix_DFS_WFS
 try:
     from PyQt6 import uic
@@ -24,9 +25,8 @@ except ImportError:
     from PyQt5.QtCore import Qt,QTimer
     from PyQt5.QtGui import QPixmap
     pyqt_version = 5
-
 import numpy as np
-import glob,sys,os,argparse,matplotlib, re
+import glob,sys,os,argparse,matplotlib
 from Backend.SaveOrLoad import SaveOrLoad
 matplotlib.use('QtAgg')
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
@@ -54,7 +54,9 @@ class MatplotlibWidget(FigureCanvas):
         self.axes = fig.add_subplot(111)
 
 class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS):
-    def __init__(self,data_dir_1=None,data_dir_2=None,comp_difference=False,auto_click_compute=False, actuator_mode = None):
+    """Response-matrix tool for steering-corrector SysID data."""
+
+    def __init__(self,data_dir_1=None,data_dir_2=None,comp_difference=False,auto_click_compute=False):
         super().__init__()
         uic.loadUi("UI files/ComputeResponseMatrix_GUI.ui", self)
         self._load_logo()
@@ -74,19 +76,13 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS):
         self.save_as_button.clicked.connect(self.__save_as_button_clicked)
         self.diff_checkbox.toggled.connect(self._compute_difference_clicked)
         self._compute_difference_clicked(self.diff_checkbox.isChecked())
-        self.actuator_mode=actuator_mode
-        if self.actuator_mode=="QM":
-            self.actuator_type_combo.setCurrentText("Quadrupole movers")
-        else:
-            self.actuator_mode="Kicker"
-            self.actuator_type_combo.setCurrentText("Correctors")
-
-        self.actuator_type_combo.currentTextChanged.connect(lambda _text: self._refresh_device_lists_for_current_mode())
+        self.label_actuator_type.setVisible(False)
+        self.actuator_type_combo.setVisible(False)
         self.plot_singular_values_button.clicked.connect(self._plot_singular_values)
         self.load_correctors_button.clicked.connect(self.__load_correctors_button_clicked)
         self.load_bpms_button.clicked.connect(self.__load_bpms_button_clicked)
-        self.hcorrector_prefixes=("zh", "zx")
-        self.vcorrector_prefixes=("zv")
+        # self.hcorrector_prefixes=("zh", "zx")
+        # self.vcorrector_prefixes=("zv")
 
         layout = self.plot_widget.layout()
         if layout is None:
@@ -142,12 +138,12 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS):
 
         ax1.plot_surface(X, Y, R.Rxx, cmap='viridis')
         ax1.set_title('$R_{xx}$')
-        ax1.set_xlabel('Corrector [#]')
+        ax1.set_xlabel(f'{self._actuator_label()} [#]')
         ax1.set_ylabel('BPM [#]')
 
         ax3.plot_surface(X, Y, R.Ryx, cmap='viridis')
         ax3.set_title('$R_{yx}$')
-        ax3.set_xlabel('Corrector [#]')
+        ax3.set_xlabel(f'{self._actuator_label()} [#]')
         ax3.set_ylabel('BPM [#]')
 
         x = np.array(range(len(R.vcorrs)))
@@ -155,12 +151,12 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS):
 
         ax2.plot_surface(X, Y, R.Rxy, cmap='viridis')
         ax2.set_title('$R_{xy}$')
-        ax2.set_xlabel('Corrector [#]')
+        ax2.set_xlabel(f'{self._actuator_label()} [#]')
         ax2.set_ylabel('BPM [#]')
 
         ax4.plot_surface(X, Y, R.Ryy, cmap='viridis')
         ax4.set_title('$R_{yy}$')
-        ax4.set_xlabel('Corrector [#]')
+        ax4.set_xlabel(f'{self._actuator_label()} [#]')
         ax4.set_ylabel('BPM [#]')
 
         fig1.tight_layout()
@@ -168,7 +164,7 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS):
         plot.flush_events()
         plot.repaint()
 
-    def _compute_response_of_one_data_directory(self,directory):
+    def _compute_response_of_one_data_directory(self, directory):
         directory=self._expand_path(directory)
         datafiles=sorted(glob.glob(os.path.join(directory,"DATA*.pkl")))
         if not datafiles:
@@ -190,7 +186,6 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS):
             bpms=self.bpms
 
         Rxx, Ryy, Rxy, Ryx, Bx, By, hcorrs, vcorrs, bpms=self._compute_response_matrix_from_directory(directory=directory, correctors=correctors, bpms=bpms, triangular=bool(self.triangular_checkbox.isChecked()), actuator_mode = self._current_actuator_mode())
-
         R = Response()
         R.bpms = bpms
         R.hcorrs = hcorrs
@@ -199,6 +194,7 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS):
         R.Rxy = Rxy
         R.Ryx = Ryx
         R.Ryy = Ryy
+        print(R.Ryy)
         R.Bx = Bx
         R.By = By
         return R
@@ -209,9 +205,10 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS):
         return os.path.abspath(os.path.normpath(expanded_path))
 
     def _current_actuator_mode(self):
-        text = self.actuator_type_combo.currentText().strip().lower()
-        if "quadrupole" in text: return "quadrupole_movers"
         return "correctors"
+
+    def _actuator_label(self):
+        return "Corrector"
 
     def _refresh_device_lists_for_current_mode(self):
         folder = self._expand_path(self.data_directory_1.text())
@@ -244,8 +241,10 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS):
         plt.show()
 
     def _pick_directory_with_data(self,line_edit):
-        base=self._expand_path(line_edit.text() or self.cwd) or self.cwd
-        folder=QFileDialog.getExistingDirectory(self,"Select data directory",base)
+        # base=self._expand_path(line_edit.text() or self.cwd) or self.cwd
+        default_dir = f"~/CERN-Flight_Simulator-Data/"
+        default_dir = os.path.expanduser(os.path.expandvars(default_dir))
+        folder=QFileDialog.getExistingDirectory(self,"Select data directory",default_dir)
         if not folder:
             return
         line_edit.setText(folder)
@@ -261,49 +260,14 @@ class MainWindow(QMainWindow, SaveOrLoad, ResponseMatrix_DFS_WFS):
         self.sequence=S.get_sequence()
         self.bpms=list(S.get_bpms()["names"])
 
-        if self._current_actuator_mode()=="quadrupole_movers":
-            self.correctors = self._quadrupole_movers_from_datafiles(datafiles)
-            self.correctorsGroup.setTitle("Quadrupole movers")
-        else:
-            self.correctors = list(S.get_correctors()["names"])
-            self.correctorsGroup.setTitle("Correctors")
+        self.correctors = list(S.get_correctors()["names"])
+        self.correctorsGroup.setTitle("Correctors")
 
         self.correctors_list.clear()
         self.correctors_list.addItems([str(c) for c in self.correctors])
 
         self.bpms_list.clear()
         self.bpms_list.addItems([str(b) for b in self.bpms])
-
-
-    def _is_h_corrector(self, s):
-        name=str(s).lower()
-        return name.startswith(self.hcorrector_prefixes)
-
-    def _is_v_corrector(self, s):
-        name=str(s).lower()
-        return name.startswith(self.vcorrector_prefixes)
-
-    def _quadrupole_movers_from_datafiles(self, datafiles):
-        pattern = re.compile(r"DATA_(.+)_(p|m)(\d+)\.pkl$")
-        names = []
-        seen = set()
-        sequence_index = {name: i for i, name in enumerate(getattr(self, "sequence", []))}
-
-        for datafile in datafiles:
-            match = pattern.search(os.path.basename(datafile))
-            if not match:
-                continue
-            tag = match.group(1)
-            if not (tag.endswith("_x") or tag.endswith("_y")):
-                continue
-            base_name = tag[:-2]
-            if base_name not in seen:
-                seen.add(base_name)
-                names.append(base_name)
-
-        names.sort(key=lambda item: sequence_index.get(item, 10**9))
-        return names
-
 
     def _substract_matrices(self,R1,R2):
         if R1.Rxx.shape != R2.Rxx.shape or R1.Ryy.shape != R2.Ryy.shape:
@@ -414,7 +378,6 @@ if __name__ == '__main__':
     parser.add_argument("--dir2",default=None,help="Second data directory")
     parser.add_argument("--diff",action="store_true",help="Difference between responses")
     parser.add_argument("--compute",action="store_true",help="Auto-click Compute button")
-    parser.add_argument("--actuator_mode",default="Kicker",help="Set Actuator mode")
 
     args=parser.parse_args()
 
@@ -422,7 +385,6 @@ if __name__ == '__main__':
     dir2=args.dir2
 
     app = QApplication(sys.argv)
-    window = MainWindow(data_dir_1=args.dir1, data_dir_2=args.dir2, comp_difference=args.diff, auto_click_compute=args.compute, actuator_mode=args.actuator_mode)
+    window = MainWindow(data_dir_1=args.dir1, data_dir_2=args.dir2, comp_difference=args.diff, auto_click_compute=args.compute)
     window.show()
     sys.exit(app.exec())
-

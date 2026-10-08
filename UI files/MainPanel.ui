@@ -7,7 +7,7 @@
     <x>0</x>
     <y>0</y>
     <width>400</width>
-    <height>209</height>
+    <height>300</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -54,6 +54,19 @@
            </widget>
           </item>
           <item>
+           <widget class="QPushButton" name="sysid_qm_interface_button">
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
+              <horstretch>0</horstretch>
+              <verstretch>0</verstretch>
+             </sizepolicy>
+            </property>
+            <property name="text">
+             <string>System Identification (QM)</string>
+            </property>
+           </widget>
+          </item>
+          <item>
            <widget class="QPushButton" name="compute_matrix_button">
             <property name="sizePolicy">
              <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
@@ -67,6 +80,19 @@
            </widget>
           </item>
           <item>
+           <widget class="QPushButton" name="compute_matrix_qm_button">
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
+              <horstretch>0</horstretch>
+              <verstretch>0</verstretch>
+             </sizepolicy>
+            </property>
+            <property name="text">
+             <string>Compute Response Matrix (QM)</string>
+            </property>
+           </widget>
+          </item>
+          <item>
            <widget class="QPushButton" name="bba_interface_button">
             <property name="sizePolicy">
              <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
@@ -76,6 +102,19 @@
             </property>
             <property name="text">
              <string>Beam Based Alignment</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QPushButton" name="bba_qm_interface_button">
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
+              <horstretch>0</horstretch>
+              <verstretch>0</verstretch>
+             </sizepolicy>
+            </property>
+            <property name="text">
+             <string>Beam Based Alignment (QM)</string>
             </property>
            </widget>
           </item>

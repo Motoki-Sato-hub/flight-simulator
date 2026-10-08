@@ -146,8 +146,11 @@ class InterfaceATF2_Linac(AbstractMachineInterface):
             'ext:EXTcharge', 'linacbt:BTEcharge', 'BIM:DR:nparticles', 'BIM:IP:nparticles'
         ]
         self.phase_kl1 = PV('CM1L:phaseRead').get()
+        self.cm1l_test_phase = self.phase_kl1 + 5
         self.laser_intensity1 = PV('RFGun:LaserIntensity1:Read').get()
         self.laser_intensity2 = PV('RFGun:LaserIntensity2:Read').get()
+        self.test_laser_intensity = 0.15
+        self.machine_name = "ATF2"
 
     def log_messages(self,console):
         self.log=console or print
@@ -159,30 +162,52 @@ class InterfaceATF2_Linac(AbstractMachineInterface):
         beta_rel = np.sqrt(1.0 - 1.0 / gamma_rel ** 2)
         return gamma_rel, beta_rel
 
+    def _pv_readback(self, pv_name):
+        return lambda: self.make_safe_float(PV(pv_name).get(), default=np.nan)
+
     def change_energy(self):
-        pv = PV('CM1L:phaseWrite')
-        rel_phase = 5
-        pv.put(self.phase_kl1+rel_phase)
-        time.sleep(1)
+        target = self.cm1l_test_phase
+        if np.isclose(float(target), float(self.phase_kl1)):
+            raise RuntimeError(f"cm1l_test_phase ({target}) equals phase_kl1 ({self.phase_kl1}). DFS measured at this setting is not useful.")
+        self._set_and_verify(lambda: PV('CM1L:phaseWrite').put(target), self._pv_readback('CM1L:phaseRead'), target, description="CM1L:phaseRead (energy change)", tolerance=1e-3)
         dP_P = 0.0 # we don't really know it
         return dP_P
-        
-    def reset_energy(self):
-        pv = PV('CM1L:phaseWrite')
-        pv.put(self.phase_kl1)
-        time.sleep(1)
 
-    def change_intensity(self, intensity=0.15):
+    def reset_energy(self):
+        self._set_and_verify(lambda: PV('CM1L:phaseWrite').put(self.phase_kl1), self._pv_readback('CM1L:phaseRead'), self.phase_kl1, description="CM1L:phaseRead (energy reset)", tolerance=1e-3)
+
+    def change_intensity(self, intensity=None):
+        if intensity is None:
+            intensity = self.test_laser_intensity
         print(f'Changing laser intensity to {intensity}...')
         laser_intensity1 = 10000 * float(intensity) / self.laser_intensity2
-        PV('RFGun:LaserIntensity1:Write').put(laser_intensity1)
-        time.sleep(3)
+        self._set_and_verify(lambda: PV('RFGun:LaserIntensity1:Write').put(laser_intensity1), self._pv_readback('RFGun:LaserIntensity1:Read'), laser_intensity1, description="RFGun:LaserIntensity1 (intensity change)", tolerance=1e-3)
         return self
 
     def reset_intensity(self):
         print('Resetting laser intensity...')
-        PV('RFGun:LaserIntensity1:Write').put(self.laser_intensity1)
+        self._set_and_verify(lambda: PV('RFGun:LaserIntensity1:Write').put(self.laser_intensity1), self._pv_readback('RFGun:LaserIntensity1:Read'), self.laser_intensity1, description="RFGun:LaserIntensity1 (intensity reset)", tolerance=1e-3)
         return self
+
+    def get_beam_settings(self):
+        settings = {"energy": {}, "intensity": {}}
+        for section, name, pv_name in (("energy", "cm1l_phase", "CM1L:phaseRead"), ("intensity", "laser_intensity1", "RFGun:LaserIntensity1:Read")):
+            settings[section][name] = float(PV(pv_name).get())
+        return settings
+
+    def restore_beam_settings(self, settings):
+        settings = settings or {}
+        phase = settings.get("energy", {}).get("cm1l_phase")
+        if phase is not None:
+            target = float(phase)
+            PV('CM1L:phaseWrite').put(target)
+            self._wait_for_pv_readback('CM1L:phaseRead', target)
+        intensity = settings.get("intensity", {}).get("laser_intensity1")
+        if intensity is not None:
+            target = float(intensity)
+            PV('RFGun:LaserIntensity1:Write').put(target)
+            self._wait_for_pv_readback('RFGun:LaserIntensity1:Read', target)
+        return True
 
     def get_sequence(self):
         return self.sequence
@@ -273,8 +298,6 @@ class InterfaceATF2_Linac(AbstractMachineInterface):
                 x.append(a[self.bpm_indexes, 1])
                 y.append(a[self.bpm_indexes, 2])
                 tmit.append(status * a[self.bpm_indexes, 3])
-                for name in names:
-                    print(f"{name} = {self.bpm_indexes[name]}")
             time.sleep(0.35)
 
         bpms = {
@@ -308,6 +331,9 @@ class InterfaceATF2_Linac(AbstractMachineInterface):
             return float(arr.flat[0])
         except Exception:
             return float(default)
+
+    def _wait_for_pv_readback(self, pv_name, target, tolerance=1e-3, timeout=10.0):
+        return self._wait_for_readback(lambda: self.make_safe_float(PV(pv_name).get(), default=np.nan), target, description=pv_name, tolerance=tolerance, timeout=timeout)
 
     def _wait_for_corrector_readback(self, corrector, target, tolerance=1e-4, timeout=1.0, poll_interval=0.05):
         readback_pv = PV(f'{corrector}:currentRead')

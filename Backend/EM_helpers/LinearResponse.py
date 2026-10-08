@@ -11,59 +11,49 @@ sigma² = R11² * <x²> + 2 R11 R12 * <x x'> + R12² * <x'²>
 gamma = (1 + alpha²) / beta
 '''
 class LinearResponse:
-    def __init__(self, coefficients_path=None, dataset_path=None):
-        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
-
-        if coefficients_path is None:
-            coefficients_path = os.path.join(
-                project_root,
-                "MachineLearning",
-                "R_matrix_recovered_coefficients.npz",
-            )
-
-        if dataset_path is None:
-            dataset_path = os.path.join(
-                project_root,
-                "MachineLearning",
-                "R_matrix_dataset_fixedK1.npz",
-            )
-
+    def __init__(self, coefficients_path, dataset_path, beta_gamma):
         self.coefficients_path = coefficients_path
         self.dataset_path = dataset_path
-
+        self.beta_gamma = beta_gamma
         if os.path.isfile(self.coefficients_path):
             self._load_coefficients(self.coefficients_path)
         elif os.path.isfile(self.dataset_path):
             self.fit_coefficients_from_R_dataset(self.dataset_path)
             self.save_coefficients(self.coefficients_path)
         else:
-            raise FileNotFoundError(
-                "Linear response data not found. Expected either "
-                f"{self.coefficients_path} or {self.dataset_path}."
-            )
+            raise FileNotFoundError(f"Linear response data not found. Expected either {self.coefficients_path} or {self.dataset_path}.")
 
     def _load_coefficients(self, path):
         data = np.load(path, allow_pickle=True)
         self.screens = [str(s) for s in data["screens"]]
         self.Rx = np.asarray(data["Rx_fit"], dtype=float)
         self.Ry = np.asarray(data["Ry_fit"], dtype=float)
+        if "beta_gamma" in data.files:
+            self.beta_gamma = float(data["beta_gamma"])
 
     def save_coefficients(self, path=None):
         if path is None:
             path = self.coefficients_path
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        np.savez(
-            path,
-            screens=np.asarray(self.screens),
-            Rx_fit=self.Rx,
-            Ry_fit=self.Ry,
-        )
+        np.savez(path, screens=np.asarray(self.screens), Rx_fit=self.Rx, Ry_fit=self.Ry, beta_gamma=np.array(self.beta_gamma, dtype=float))
 
     def fit_coefficients_from_R_dataset(self, dataset_path=None):
         if dataset_path is None:
             dataset_path = self.dataset_path
-
         dataset = np.load(dataset_path, allow_pickle=True)
+        if "beta_gamma" in dataset.files:
+            self.beta_gamma = float(dataset["beta_gamma"])
+        elif self.beta_gamma is not None:
+            self.beta_gamma = float(self.beta_gamma)
+            print(f"Warning: dataset {dataset_path} does not contain beta_gamma, using fallback from interface.")
+        else:
+            raise RuntimeError(
+                f"Dataset {dataset_path} does not contain beta_gamma "
+                "and no fallback beta_gamma was provided."
+            )
+        if not np.isfinite(self.beta_gamma) or self.beta_gamma <= 0:
+            raise RuntimeError(f"Invalid beta_gamma: {self.beta_gamma}")
+
         I = np.asarray(dataset["X"], dtype=float) # twiss parameters at the entrance
         # I[i] = [
         #     emit_x_norm,
@@ -87,19 +77,15 @@ class LinearResponse:
         #     ]
         # ]
 
-
-
         O = np.asarray(dataset["Y"], dtype=float) # response on screens, sigma**2
         self.screens = [str(s) for s in dataset["screens"]]
 
-        beta_gamma = self._get_beta_gamma(dataset)
-
-        emit_x_geom = I[:, 0] / beta_gamma
+        emit_x_geom = I[:, 0] / self.beta_gamma
         beta_x = I[:, 1]
         alpha_x = I[:, 2]
         gamma_x = (1.0 + alpha_x**2) / beta_x
 
-        emit_y_geom = I[:, 3] / beta_gamma
+        emit_y_geom = I[:, 3] / self.beta_gamma
         beta_y = I[:, 4]
         alpha_y = I[:, 5]
         gamma_y = (1.0 + alpha_y**2) / beta_y
@@ -116,16 +102,10 @@ class LinearResponse:
 
         return self.Rx, self.Ry
 
-    @staticmethod
-    def _get_beta_gamma(dataset):
-        if "beta_gamma" in dataset.files:
-            return float(dataset["beta_gamma"])
-        return 1300.0 / 0.51099895
+    def predict_sigma2_from_twiss_set(self, screens, emit_x_norm, beta_x0, alpha_x0, emit_y_norm, beta_y0, alpha_y0):
 
-    def predict_sigma2_from_twiss_set(self, screens, emit_x_norm, beta_x0, alpha_x0, emit_y_norm, beta_y0, alpha_y0, beta_gamma):
-
-        emit_x_geom = float(emit_x_norm) / float(beta_gamma)
-        emit_y_geom = float(emit_y_norm) / float(beta_gamma)
+        emit_x_geom = float(emit_x_norm) / float(self.beta_gamma)
+        emit_y_geom = float(emit_y_norm) / float(self.beta_gamma)
 
         beta_x0 = float(beta_x0)
         alpha_x0 = float(alpha_x0)
@@ -145,7 +125,7 @@ class LinearResponse:
 
         return pred_x.reshape(1, -1), pred_y.reshape(1, -1)
 
-    def solve_twiss_from_measured_sigma2(self, screens, sigma2_x, sigma2_y, beta_gamma):
+    def solve_twiss_from_measured_sigma2(self, screens, sigma2_x, sigma2_y):
         idx = [self.screens.index(str(screen)) for screen in screens]
 
         if len(idx) < 3:
@@ -174,8 +154,8 @@ class LinearResponse:
         return {
             "emit_x_geom": emit_x_geom,
             "emit_y_geom": emit_y_geom,
-            "emit_x_norm": emit_x_geom * beta_gamma,
-            "emit_y_norm": emit_y_geom * beta_gamma,
+            "emit_x_norm": emit_x_geom * self.beta_gamma,
+            "emit_y_norm": emit_y_geom * self.beta_gamma,
             "beta_x0": beta_x0,
             "alpha_x0": alpha_x0,
             "beta_y0": beta_y0,
