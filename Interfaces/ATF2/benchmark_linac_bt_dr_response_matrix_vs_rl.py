@@ -230,7 +230,7 @@ def main() -> None:
         "model_free_rl_baseline": cem.as_dict(),
         "interpretation": {
             "expected_local_result": "The response matrix has explicit local derivatives, so it should be more sample-efficient in this deterministic near-linear synthetic task.",
-            "not_yet_tested": "Neither method is validated against BPM noise, magnet hysteresis, changing optics, real aperture/loss data, or a surveyed IPZT-to-RING0 map.",
+            "not_yet_tested": "Neither method is validated against BPM noise, magnet hysteresis, changing optics, real aperture/loss data, or a surveyed IPZT-to-KII.1 map.",
             "decision_rule": "Do not claim RL superiority from this fixture.  Pre-register noisy/nonlinear held-out errors, equal actuator constraints and interaction budget, then require multi-turn and physical-transmission validation.",
         },
     }, indent=2))

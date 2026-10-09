@@ -76,7 +76,7 @@ def main() -> None:
         "ring_survival_after_turns": tracked.dr_after_turns.survival_fraction_from_input,
         "first_loss_turn": first_loss_turn,
         "limitations": [
-            "No surveyed IPZT-to-RING0 coordinate/pulsed-kicker calibration is loaded.",
+            "No surveyed IPZT-to-KII.1 coordinate/pulsed-kicker calibration is loaded.",
             "No complete measured aperture/loss-monitor table is loaded.",
             "DR RF phase and BT time-of-flight are model values, not calibrated timing data.",
         ],

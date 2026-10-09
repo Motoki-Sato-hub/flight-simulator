@@ -1,0 +1,21 @@
+! Deliberately small SAD syntax/element coverage fixture for the common converter.
+MOMENTUM = 1 GEV;
+
+DRIFT D  = ( L = 0.10 RADIUS = -0.01 );
+BEND  B  = ( L = 0.20 ANGLE = 1 DEG K1 = 0.05 E1 = 0.5 E2 = 0.5 );
+BEND  ZH = ( L = 0.01 ANGLE = 0 );
+QUAD  Q  = ( L = 0.10 K1 = 0.20 DX = 1 MM DY = -2 MM ROTATE = 10 DEG );
+SEXT  S  = ( L = 0.10 K2 = 0.30 );
+OCT   O  = ( L = 0.05 K3 = 0.04 );
+DECA  D10 = ( L = 0.05 K4 = 0.05 );
+DODECA D12 = ( L = 0.05 K5 = 0.06 );
+MULT  M  = ( L = 0.05 K0 = 0.001 SK1 = 0.002 K2 = 0.003 SK3 = 0.004 K20 = 0.005 SK20 = 0.006 );
+SOL   SO = ( L = 0.10 BZ = 0.2 RADIUS = 0.02 );
+CAVI  C  = ( L = 0.10 VOLT = 1 MV FREQ = 1 GHZ PHI = -90 DEG );
+TCAVI TC = ( L = 0.00 VOLT = 1 MV FREQ = 1 GHZ );
+COORD CO = ( DX = 1 MM CHI1 = 1 MRAD );
+APERT AP = ( AX = 10 MM AY = 20 MM DX1 = -1 MM DX2 = 1 MM );
+MONI  BPM = ( );
+MARK  END = ( );
+
+LINE TEST = ( D B ZH Q S O D10 D12 M SO C TC CO AP BPM END );

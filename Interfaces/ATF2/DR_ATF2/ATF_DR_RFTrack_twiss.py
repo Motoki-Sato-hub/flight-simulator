@@ -99,7 +99,14 @@ def _keyword(element) -> str:
     if element_type == "SBend":
         return "SBEND"
     if element_type == "Corrector":
-        return "HKICKER" if element.get_name().startswith("ZH") else "VKICKER"
+        if element.get_name().startswith("ZH"):
+            return "HKICKER"
+        if element.get_name().startswith("ZV"):
+            return "VKICKER"
+        # KII/KIX are time-dependent, zero-strength devices in the nominal
+        # lattice.  Their first-turn pulse belongs to the pipeline runtime,
+        # not this static periodic-optics exchange file.
+        return "MARKER"
     if element_type == "Multipole":
         return "MULTIPOLE"
     return "DRIFT"

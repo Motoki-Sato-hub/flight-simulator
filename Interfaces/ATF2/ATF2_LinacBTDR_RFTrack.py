@@ -4,12 +4,13 @@ The pipeline deliberately keeps the three model boundaries visible:
 
 * the SAD-derived accelerating Linac+BT lattice is prepared at 1.3 GeV/c;
 * a calibratable transverse map transfers its exit bunch to the DR reference;
-* the DR ``RING0`` model is tracked turn-by-turn for a requested short horizon.
+* the DR model, cyclically started at its physical injection boundary, is
+  tracked turn-by-turn for a requested short horizon.
 
 It is an error-free *software* connection, not yet a physical injection model.
 The SAD BT ``CELLST`` includes the historical septa and nominal ``BK1R``
 kicker through ``IPZT``.  What remains unavailable is the surveyed/calibrated
-map from that endpoint into the periodic DR ``RING0`` coordinates, including
+map from that endpoint into the periodic DR ``KII.1`` coordinates, including
 the pulsed kicker setting and aperture/loss model.  Reports therefore call the
 multi-turn quantity ``ring_survival`` rather than measured/final transmission.
 """
@@ -30,12 +31,12 @@ import RF_Track as rft
 from Interfaces.ATF2.DR_ATF2.ATF_DR_RFTrack_correction import ATFDRRingCorrection
 from Interfaces.ATF2.DR_ATF2.ATF_DR_RFTrack_lattice import (
     NOMINAL_MOMENTUM_MEV_C,
+    PULSED_KICKER_SAD_NAMES,
     build_atf_dr_lattice,
 )
 from Interfaces.ATF2.DR_ATF2.ATF_DR_RFTrack_emittance import (
     find_synchronous_orbit,
 )
-from Interfaces.ATF2.DR_ATF2.ATF_DR_RFTrack_twiss import load_atf_dr_twiss
 from Interfaces.ATF2.simulate_linac_bt_dr_handoff import (
     DEFAULT_CAVITY_VOLTAGE_MV,
     DEFAULT_INPUT_MOMENTUM_MEV_C,
@@ -50,7 +51,8 @@ from Interfaces.ATF2.simulate_linac_bt_dr_handoff import (
 # changes its optics, so the historical 1.542 GeV TFS endpoint is not valid
 # for the present 1.3 GeV model.
 _SAD_ENTRANCE_TWISS_CACHE: dict[str, tuple[float, float, float, float]] = {}
-_DR_START_OPTICS_CACHE: tuple[tuple[float, float, float, float], np.ndarray] | None = None
+_DR_ENTRY_OPTICS_CACHE: dict[str, tuple[tuple[float, float, float, float], np.ndarray]] = {}
+RFTRACK_MRAD_PER_RAD = 1.0e3
 
 # The online optimisation interface labels eight Linac RF phase setpoints
 # CM1L..CM8L, while the SAD Linac has sixteen powered CA structures.  Until a
@@ -63,26 +65,78 @@ KLYSTRON_CAVITY_GROUPS: dict[str, tuple[str, str]] = {
 }
 
 
-def _dr_start_optics() -> tuple[tuple[float, float, float, float], np.ndarray]:
-    """Load the RF-Track RING0-start Twiss and native-coordinate dispersion."""
-    global _DR_START_OPTICS_CACHE
-    if _DR_START_OPTICS_CACHE is None:
-        target_table = load_atf_dr_twiss()
-        target = next(
-            (row for row in target_table if str(row["NAME"]) == "RING0$START"),
-            None,
-        )
-        if target is None:
-            raise ValueError("RFTrack DR Twiss table has no RING0$START row")
-        target_twiss = tuple(
-            float(target[name]) for name in ("BETX", "ALFX", "BETY", "ALFY")
-        )
-        target_dispersion = np.array(
-            [float(target["DX"]), float(target["DPX"]),
-             float(target["DY"]), float(target["DPY"])]
-        )
-        _DR_START_OPTICS_CACHE = (target_twiss, target_dispersion)
-    return _DR_START_OPTICS_CACHE
+def _periodic_twiss_from_map(matrix: np.ndarray) -> tuple[float, float]:
+    """Return periodic beta/alpha for one uncoupled 2-by-2 map."""
+    cosine = float(np.clip(np.trace(matrix) / 2.0, -1.0, 1.0))
+    sine_magnitude = float(np.sqrt(max(0.0, 1.0 - cosine**2)))
+    sign_source = matrix[0, 1] if abs(matrix[0, 1]) > 1.0e-14 else -matrix[1, 0]
+    sine = float(np.copysign(sine_magnitude, sign_source))
+    if abs(sine) < 1.0e-12:
+        raise RuntimeError("Cannot calculate periodic Twiss at an integer/half-integer tune")
+    beta = float(matrix[0, 1] / sine)
+    if beta <= 0.0:
+        raise RuntimeError("DR one-turn map is not transversely stable")
+    return beta, float((matrix[0, 0] - matrix[1, 1]) / (2.0 * sine))
+
+
+def _dr_entry_optics(
+    entry: str,
+) -> tuple[tuple[float, float, float, float], np.ndarray]:
+    """Linearise nominal RING0 at a physical cyclic entry boundary.
+
+    The checked-in Twiss file is referenced to the daihon line origin.  The
+    injected bunch instead enters immediately upstream of ``KII.1``.  Compute
+    the periodic Twiss and dispersion at that rotated boundary so a handoff
+    never combines coordinates from two different ring locations.
+    """
+    key = entry.upper()
+    if key in _DR_ENTRY_OPTICS_CACHE:
+        return _DR_ENTRY_OPTICS_CACHE[key]
+    lattice = build_atf_dr_lattice(start_at=key)
+    correction = ATFDRRingCorrection(lattice, NOMINAL_MOMENTUM_MEV_C)
+    closed = np.asarray(correction.find_closed_orbit().initial_coordinates, dtype=float)
+
+    def track(coordinates: np.ndarray) -> np.ndarray:
+        phase_space = np.zeros((1, 6), dtype=float)
+        phase_space[0, :4] = coordinates
+        phase_space[0, 5] = NOMINAL_MOMENTUM_MEV_C
+        tracked = lattice.track(rft.Bunch6d(rft.electronmass, 1.0, -1.0, phase_space))
+        if tracked.size() != 1:
+            raise RuntimeError(f"DR finite-difference probe was lost at entry {entry}")
+        return np.asarray(tracked.get_phase_space(), dtype=float)[0, :4]
+
+    steps = np.array((1.0e-3, 1.0e-4, 1.0e-3, 1.0e-4), dtype=float)
+    matrix = np.empty((4, 4), dtype=float)
+    for column, step in enumerate(steps):
+        positive, negative = closed.copy(), closed.copy()
+        positive[column] += step
+        negative[column] -= step
+        matrix[:, column] = (track(positive) - track(negative)) / (2.0 * step)
+    coupling = max(
+        float(np.max(np.abs(matrix[:2, 2:]))),
+        float(np.max(np.abs(matrix[2:, :2]))),
+    )
+    if coupling > 1.0e-8:
+        raise RuntimeError(f"Nominal DR map at {entry} is coupled ({coupling:.3e})")
+    momentum_step = 1.0e-4
+    plus = correction.find_closed_orbit(
+        momentum_mev_c=NOMINAL_MOMENTUM_MEV_C * (1.0 + momentum_step),
+        initial_coordinates=closed,
+    )
+    minus = correction.find_closed_orbit(
+        momentum_mev_c=NOMINAL_MOMENTUM_MEV_C * (1.0 - momentum_step),
+        initial_coordinates=closed,
+    )
+    target = (
+        *_periodic_twiss_from_map(matrix[:2, :2]),
+        *_periodic_twiss_from_map(matrix[2:, 2:]),
+    )
+    dispersion = (
+        np.asarray(plus.initial_coordinates, dtype=float)
+        - np.asarray(minus.initial_coordinates, dtype=float)
+    ) / (2.0 * momentum_step)
+    _DR_ENTRY_OPTICS_CACHE[key] = (target, dispersion)
+    return _DR_ENTRY_OPTICS_CACHE[key]
 
 
 def _sad_entrance_twiss(
@@ -378,6 +432,8 @@ class PipelineResult:
     turn_history_sample_every: int | None
     dr_turn_history_turns: tuple[int, ...]
     dr_turn_history: tuple[BunchSummary, ...]
+    dr_first_turn_kicks_rad: dict[str, tuple[float, float]]
+    dr_entry: str
     handoff: dict[str, object]
     apertures: dict[str, dict[str, tuple[float, float, str | None]]]
     scope: str
@@ -395,6 +451,8 @@ class PipelineResult:
             "turn_history_sample_every": self.turn_history_sample_every,
             "dr_turn_history_turns": list(self.dr_turn_history_turns),
             "dr_turn_history": [asdict(summary) for summary in self.dr_turn_history],
+            "dr_first_turn_kicks_rad": self.dr_first_turn_kicks_rad,
+            "dr_entry": self.dr_entry,
             "handoff": self.handoff,
             "apertures": self.apertures,
             "scope": self.scope,
@@ -515,6 +573,8 @@ class ATF2LinacBTDRRFTrack:
         handoff_mode: str = "reference_anchored",
         linac_bt_apertures_mm: Mapping[str, tuple[float, float] | tuple[float, float, str]] | None = None,
         dr_apertures_mm: Mapping[str, tuple[float, float] | tuple[float, float, str]] | None = None,
+        dr_first_turn_kicks_rad: Mapping[str, tuple[float, float]] | None = None,
+        dr_entry: str = "KII.1",
         dr_rf_mode: str = "disabled",
         dr_quantum_radiation: bool = False,
         dr_rf_phase_deg: float | None = None,
@@ -525,6 +585,7 @@ class ATF2LinacBTDRRFTrack:
             raise ValueError(
                 "handoff_mode must be 'reference_anchored' or 'sad_optics_matched'"
             )
+        self.dr_entry = str(dr_entry).upper()
         self.input_momentum_mev_c = float(input_momentum_mev_c)
         self.cavity_voltage_mv = float(cavity_voltage_mv)
         supplied_klystron_phases = dict(klystron_phase_offsets_deg or {})
@@ -606,12 +667,18 @@ class ATF2LinacBTDRRFTrack:
             rf_mode=dr_rf_mode,
             radiation_quantum=dr_quantum_radiation,
             rf_phase_deg=dr_rf_phase_deg,
+            start_at=self.dr_entry,
         )
         self.dr_apertures = _apply_apertures(
             self.dr_lattice, dr_apertures_mm, section="DR"
         )
         self.dr_momentum_mev_c = NOMINAL_MOMENTUM_MEV_C
-        self.dr_start_twiss, self.dr_start_dispersion_mm_mrad = _dr_start_optics()
+        self.dr_first_turn_kicks_rad = self._normalise_first_turn_kicks(
+            dr_first_turn_kicks_rad
+        )
+        self.dr_start_twiss, self.dr_start_dispersion_mm_mrad = _dr_entry_optics(
+            self.dr_entry
+        )
         self.dr_synchronous_orbit: np.ndarray | None = None
         if dr_rf_mode == "disabled":
             closed_orbit = ATFDRRingCorrection(
@@ -628,10 +695,15 @@ class ATF2LinacBTDRRFTrack:
             self.dr_closed_orbit = self.dr_synchronous_orbit[:4].copy()
         self.handoff_mode = handoff_mode
         if handoff is not None:
+            if handoff.target_location.upper() != self.dr_entry:
+                raise ValueError(
+                    "handoff target_location does not match the DR entry: "
+                    f"{handoff.target_location!r} != {self.dr_entry!r}"
+                )
             self.handoff = handoff
         elif handoff_mode == "reference_anchored":
             self.handoff = TransverseHandoff.reference_anchored(
-                self.reference_exit, self.dr_closed_orbit
+                self.reference_exit, self.dr_closed_orbit, target_location=self.dr_entry
             )
         else:
             self.handoff = self._sad_optics_matched_handoff(helper, combined_tfs)
@@ -639,16 +711,69 @@ class ATF2LinacBTDRRFTrack:
             element.get_name() for element in self.linac_bt_lattice.get_correctors()
         )
 
+    def _normalise_first_turn_kicks(
+        self, supplied: Mapping[str, tuple[float, float]] | None,
+    ) -> dict[str, tuple[float, float]]:
+        """Resolve KII/KIX pulse requests to RF-Track instance names.
+
+        ``KII`` and ``KIX`` each expand to the two SAD occurrences, while an
+        instance name such as ``KII.1`` selects one magnet.  Values are
+        physical ``(theta_x, theta_y)`` kicks in rad.  No nominal strength is
+        inferred from the daihon.
+        """
+        available = {
+            element.get_name(): element
+            for element in self.dr_lattice.get_correctors()
+            if element.get_name().split(".", 1)[0] in PULSED_KICKER_SAD_NAMES
+        }
+        configured: dict[str, tuple[float, float]] = {}
+        for requested, values in (supplied or {}).items():
+            kick = np.asarray(values, dtype=float)
+            if kick.shape != (2,) or not np.all(np.isfinite(kick)):
+                raise ValueError(
+                    f"{requested}: first-turn DR kicker must be a finite (theta_x, theta_y) pair in rad"
+                )
+            targets = (
+                [name for name in available if name.split(".", 1)[0] == requested]
+                if requested in PULSED_KICKER_SAD_NAMES else [requested]
+            )
+            if not targets or any(name not in available for name in targets):
+                raise ValueError(
+                    f"Unknown pulsed DR kicker {requested!r}; available: {sorted(available)}"
+                )
+            value = (float(kick[0]), float(kick[1]))
+            for name in targets:
+                previous = configured.get(name)
+                if previous is not None and previous != value:
+                    raise ValueError(f"Conflicting first-turn kicks specified for {name}")
+                configured[name] = value
+        return configured
+
+    def _set_first_turn_kicker_state(self, active: bool) -> None:
+        """Apply or clear the explicitly configured, one-turn kicker pulse."""
+        p_over_q = self.dr_momentum_mev_c / -1.0
+        for name, kick in self.dr_first_turn_kicks_rad.items():
+            elements = self.dr_lattice.get_elements_by_name(name)
+            elements = elements if isinstance(elements, list) else [elements]
+            if len(elements) != 1:
+                raise RuntimeError(f"Expected exactly one pulsed DR kicker named {name}")
+            values = kick if active else (0.0, 0.0)
+            elements[0].set_kick(
+                p_over_q,
+                RFTRACK_MRAD_PER_RAD * values[0],
+                RFTRACK_MRAD_PER_RAD * values[1],
+            )
+
     def _sad_optics_matched_handoff(
         self, helper: ModuleType, combined_tfs: Path
     ) -> TransverseHandoff:
-        """Build a configured IPZT-to-RING0 covariance-matching baseline.
+        """Build a configured IPZT-to-DR-entry covariance-matching baseline.
 
         SAD provides the entrance design Twiss, while the exit Twiss and
         dispersion are calculated from a centred RF-Track map at this
         instance's input energy and cavity voltage.  This is essential after
         scaling the historical 1.542 GeV lattice to 1.3 GeV.  The resulting
-        map is still an optics baseline, not a surveyed IPZT-to-RING0 map.
+        map is still an optics baseline, not a surveyed IPZT-to-DR-entry map.
         """
         entrance_twiss = _sad_entrance_twiss(helper, combined_tfs)
         source_twiss, source_dispersion = _rftrack_linac_bt_exit_optics(
@@ -656,7 +781,9 @@ class ATF2LinacBTDRRFTrack:
             input_momentum_mev_c=self.input_momentum_mev_c,
             entrance_twiss=entrance_twiss,
         )
-        target_twiss, target_dispersion = _dr_start_optics()
+        target_twiss, target_dispersion = (
+            self.dr_start_twiss, self.dr_start_dispersion_mm_mrad
+        )
         return TransverseHandoff.twiss_dispersion_matched(
             self.reference_exit,
             self.dr_closed_orbit,
@@ -665,10 +792,11 @@ class ATF2LinacBTDRRFTrack:
             source_dispersion_mm_mrad=source_dispersion,
             target_dispersion_mm_mrad=target_dispersion,
             reference_momentum_mev_c=self.reference_exit_momentum_mev_c,
+            target_location=self.dr_entry,
             provenance=(
                 "zero-phase symplectic Twiss/dispersion match from the SAD IPP1L "
                 "design Twiss propagated by a centred RF-Track Linac+BT map at the "
-                "configured energy/RF voltage, to RFTrack DR RING0; design-optics "
+                f"configured energy/RF voltage, to RFTrack DR entry {self.dr_entry}; design-optics "
                 "baseline, not surveyed injection map"
             ),
         )
@@ -909,7 +1037,7 @@ class ATF2LinacBTDRRFTrack:
                 betatron[:, 2:], target_beta_m=by, target_alpha=ay
             ),
             reference=(
-                "RFTrack RING0$START Twiss; first-order target dispersion "
+                f"RFTrack DR entry {self.dr_entry} Twiss; first-order target dispersion "
                 "subtracted using Linac+BT design reference momentum"
             ),
         )
@@ -948,16 +1076,25 @@ class ATF2LinacBTDRRFTrack:
         completed_turns = 0
         turn_history: list[BunchSummary] = []
         turn_history_turns: list[int] = []
-        for turn in range(1, dr_turns + 1):
-            if dr_bunch.size() == 0:
-                break
-            dr_bunch = self.dr_lattice.track(dr_bunch)
-            completed_turns += 1
-            if record_turn_history and (
-                turn % history_every == 0 or turn == dr_turns or dr_bunch.size() == 0
-            ):
-                turn_history_turns.append(turn)
-                turn_history.append(_summary(dr_bunch, input_charge_e))
+        try:
+            for turn in range(1, dr_turns + 1):
+                if dr_bunch.size() == 0:
+                    break
+                if turn == 1 and self.dr_first_turn_kicks_rad:
+                    self._set_first_turn_kicker_state(active=True)
+                dr_bunch = self.dr_lattice.track(dr_bunch)
+                completed_turns += 1
+                if turn == 1 and self.dr_first_turn_kicks_rad:
+                    self._set_first_turn_kicker_state(active=False)
+                if record_turn_history and (
+                    turn % history_every == 0 or turn == dr_turns or dr_bunch.size() == 0
+                ):
+                    turn_history_turns.append(turn)
+                    turn_history.append(_summary(dr_bunch, input_charge_e))
+        finally:
+            # A tracking exception must not leak a pulsed state into a later run.
+            if self.dr_first_turn_kicks_rad:
+                self._set_first_turn_kicker_state(active=False)
         after_summary = _summary(dr_bunch, input_charge_e)
         return PipelineResult(
             input=input_summary,
@@ -970,6 +1107,8 @@ class ATF2LinacBTDRRFTrack:
             turn_history_sample_every=(history_every if record_turn_history else None),
             dr_turn_history_turns=tuple(turn_history_turns),
             dr_turn_history=tuple(turn_history),
+            dr_first_turn_kicks_rad=dict(self.dr_first_turn_kicks_rad),
+            dr_entry=self.dr_entry,
             handoff=self.handoff.as_dict(),
             apertures={
                 "linac_bt": self.linac_bt_apertures,
@@ -981,8 +1120,12 @@ class ATF2LinacBTDRRFTrack:
                    else "transverse-only DR ring survival")
             ),
             limitations=(
-                "The SAD BT line includes historical septa and a nominal BK1R kicker through IPZT.  The selected IPZT-to-RING0 handoff is a design baseline, not a surveyed/calibrated injection map.",
-                "The periodic RING0 lattice does not model injection pulse timing or measured kicker settings.",
+                "The SAD-to-TFS Linac+BT translation reproduces the element inventory, geometry and design reference orbit, but the historical BT SAD MARK Twiss is not yet reproduced by the standard RF-Track BEND/COORD maps.  Do not use this model alone for precision BT beam-size or acceptance claims.",
+                f"The SAD BT line includes historical septa and a nominal BK1R kicker through IPZT.  The selected IPZT-to-{self.dr_entry} handoff is a design baseline, not a surveyed/calibrated injection map.",
+                *(('The configured KII/KIX pulses are active only on the first DR turn; their waveform, timing and calibration must be supplied externally.',)
+                  if self.dr_first_turn_kicks_rad else (
+                    "No first-turn injection/extraction kicker pulse is configured; the daihon supplies geometry but not an operating pulse value.",
+                )),
                 "A directly supplied entrance 6D bunch is valid only at IPP1L and does not by itself calibrate its diagnostic reconstruction or transport to that point.",
                 *(('No aperture/loss-monitor model is loaded, so ring_survival is not physical final transmission.',)
                   if not (self.linac_bt_apertures or self.dr_apertures) else (

@@ -30,6 +30,13 @@ NOMINAL_MOMENTUM_MEV_C = 1299.9999
 EQUILIBRIUM_RF_CAVITY_LENGTH_M = 1e-3
 EQUILIBRIUM_RF_PHASE_DEG = 180.0
 
+# The SAD RING0 sequence has two extraction kickers (KIX) and two injection
+# kickers (KII).  Their daihon definitions deliberately have zero angle: the
+# pulse waveform/amplitude is an operating setting, not lattice geometry.
+# Retain them as correctors so an explicitly supplied first-turn pulse can be
+# studied; their nominal kick remains exactly zero.
+PULSED_KICKER_SAD_NAMES = frozenset(("KII", "KIX"))
+
 
 def load_lattice_data(
     lattice_data_path: str | Path | None = None,
@@ -245,6 +252,33 @@ def _instance_name(
     return f"{source_name.upper()}.{occurrences[source_name]}"
 
 
+def _rotate_ring_sequence(sequence: list[str], start_at: str | None) -> list[str]:
+    """Return one periodic SAD sequence, optionally beginning at an instance.
+
+    ``start_at`` uses the source occurrence notation emitted by this module,
+    such as ``KII.1``.  It is intentionally an exact selector: a ring can be
+    rotated freely, but choosing a physical injection boundary must never be
+    guessed from a bare repeated element name.
+    """
+    if start_at is None:
+        return list(sequence)
+    requested = start_at.upper()
+    occurrences: Counter[str] = Counter()
+    names: list[str] = []
+    for source_name in sequence:
+        occurrences[source_name] += 1
+        names.append(f"{source_name.upper()}.{occurrences[source_name]}")
+    try:
+        index = names.index(requested)
+    except ValueError as error:
+        candidates = sorted(
+            name for name in names if name.split(".", 1)[0] == requested.split(".", 1)[0]
+        )
+        detail = f" Candidates: {', '.join(candidates)}" if candidates else ""
+        raise ValueError(f"Unknown RING0 start element {start_at!r}.{detail}") from error
+    return list(sequence[index:]) + list(sequence[:index])
+
+
 def build_atf_dr_lattice(
     momentum_mev_c: float = NOMINAL_MOMENTUM_MEV_C,
     charge: float = -1.0,
@@ -255,6 +289,7 @@ def build_atf_dr_lattice(
     rf_phase_deg: float | None = None,
     rf_voltage_scale: float = 1.0,
     lattice_data_path: str | Path | None = None,
+    start_at: str | None = None,
 ):
     """Build the ATF DR ``RING0`` lattice using RF-Track elements.
 
@@ -285,6 +320,10 @@ def build_atf_dr_lattice(
         Optional generated SAD export.  The default is the checked-in 2011
         lattice; an explicit path is intended for historical comparisons and
         never changes that default.
+    start_at:
+        Optional exact SAD occurrence such as ``"KII.1"``.  It cyclically
+        rotates the periodic RING0 sequence so that the named element is the
+        first element.  The default preserves the source daihon's RING0 start.
     """
     if rf_mode not in {"disabled", "equilibrium"}:
         raise ValueError("rf_mode must be 'disabled' or 'equilibrium'")
@@ -299,6 +338,7 @@ def build_atf_dr_lattice(
 
     data = load_lattice_data(lattice_data_path)
     definitions = data["definitions"]
+    sequence = _rotate_ring_sequence(list(data["sequence"]), start_at)
     p_over_q = float(momentum_mev_c) / float(charge)
     lattice = rft.Lattice()
 
@@ -310,7 +350,7 @@ def build_atf_dr_lattice(
     bpm_index = 0
     drift_index = 0
 
-    for source_name in data["sequence"]:
+    for source_name in sequence:
         definition = definitions[source_name]
         element_type = definition["type"]
         attributes = definition["attributes"]
@@ -322,7 +362,10 @@ def build_atf_dr_lattice(
             drift_index += 1
         elif element_type == "BEND":
             angle = float(attributes.get("ANGLE", 0.0))
-            if source_name.upper().startswith(("ZH", "ZV")):
+            if (
+                source_name.upper().startswith(("ZH", "ZV"))
+                or source_name.upper() in PULSED_KICKER_SAD_NAMES
+            ):
                 element = rft.Corrector(length)
             elif abs(angle) > 0.0:
                 # SAD BEND is represented as a rectangular bend.  RF-Track's
@@ -343,8 +386,8 @@ def build_atf_dr_lattice(
                         )
                     )
             else:
-                # Zero-angle injection/extraction bends and BHE are passive in
-                # this model; operational DR steerers are the ZH/ZV elements.
+                # BHE and other zero-angle BENDs are passive in this model.
+                # KII/KIX were handled above as zero-strength pulsed kickers.
                 element = rft.Drift(length)
                 drift_index += 1
         elif element_type == "QUAD":

@@ -19,7 +19,7 @@ from Interfaces.ATF2.ATF2_LinacBTDR_RFTrack import (
     ATF2LinacBTDRRFTrack,
     EntranceBunchTwiss,
 )
-from Interfaces.ATF2.benchmark_linac_bt_dr_capture_proxy import (
+from Interfaces.ATF2.linac_bt_dr_model_config import (
     MODEL_ENERGY_MATCHED_CAVITY_VOLTAGE_MV,
 )
 
@@ -27,6 +27,13 @@ from Interfaces.ATF2.benchmark_linac_bt_dr_capture_proxy import (
 def _require(condition: bool, message: str) -> None:
     if not condition:
         raise AssertionError(message)
+
+
+def _single_corrector_kick_mrad(machine: ATF2LinacBTDRRFTrack, name: str) -> np.ndarray:
+    """Read an RF-Track corrector's kick using the pipeline's charge sign."""
+    elements = machine.dr_lattice.get_elements_by_name(name)
+    element = elements[0] if isinstance(elements, list) else elements
+    return np.asarray(element.get_kick(machine.dr_momentum_mev_c / -1.0), dtype=float)
 
 
 def main() -> None:
@@ -41,6 +48,11 @@ def main() -> None:
         cavity_voltage_mv=MODEL_ENERGY_MATCHED_CAVITY_VOLTAGE_MV,
         dr_rf_mode="equilibrium",
         handoff_mode="sad_optics_matched",
+    )
+    _require(machine.dr_entry == "KII.1", "pipeline DR entry is not the injection-kicker boundary")
+    _require(
+        machine.dr_lattice["*"][1].get_name() == "KII.1",
+        "the first DR element is not the first injection kicker",
     )
     energy_error = (
         machine.reference_exit_momentum_mev_c - float(machine.dr_synchronous_orbit[5])
@@ -71,9 +83,46 @@ def main() -> None:
     _require(finite.linac_bt_exit.survival_fraction_from_input == 1.0, "Linac+BT lost design test bunch")
     _require(finite.dr_after_turns.survival_fraction_from_input == 1.0, "DR lost design test bunch")
     _require(
+        any("BT SAD MARK Twiss" in item for item in finite.limitations),
+        "pipeline report lost its declared BT optics-fidelity limitation",
+    )
+    _require(
         finite.dr_injection_optics.x.mismatch_to_design < 1.2
         and finite.dr_injection_optics.y.mismatch_to_design < 1.2,
         "configured Linac+BT handoff no longer matches the DR design optics",
+    )
+
+    # This is a software gate for timing semantics, not a claim about a real
+    # KII calibration.  It confirms that the injection boundary is physically
+    # before KII.1, the pulse changes the first-turn result, and the mutable
+    # RF-Track element is reset before a subsequent study can reuse it.
+    no_pulse_turn = machine.track(machine.make_reference_bunch(), dr_turns=1)
+    pulsed_machine = ATF2LinacBTDRRFTrack(
+        cavity_voltage_mv=MODEL_ENERGY_MATCHED_CAVITY_VOLTAGE_MV,
+        dr_rf_mode="equilibrium",
+        handoff_mode="sad_optics_matched",
+        dr_first_turn_kicks_rad={"KII.1": (1.0e-6, 0.0)},
+    )
+    _require(
+        np.allclose(_single_corrector_kick_mrad(pulsed_machine, "KII.1"), 0.0),
+        "KII.1 is not initially unpowered",
+    )
+    pulsed_turn = pulsed_machine.track(pulsed_machine.make_reference_bunch(), dr_turns=1)
+    _require(
+        pulsed_turn.dr_after_turns.survival_fraction_from_input == 1.0,
+        "synthetic first-turn KII.1 pulse lost the reference particle",
+    )
+    _require(
+        not np.isclose(
+            pulsed_turn.dr_after_turns.mean_x_mm,
+            no_pulse_turn.dr_after_turns.mean_x_mm,
+            atol=1.0e-8,
+        ),
+        "synthetic first-turn KII.1 pulse did not affect the tracked orbit",
+    )
+    _require(
+        np.allclose(_single_corrector_kick_mrad(pulsed_machine, "KII.1"), 0.0),
+        "KII.1 pulse leaked into a subsequent DR turn/study",
     )
     reference = machine.track(
         machine.make_reference_bunch(),
@@ -91,6 +140,7 @@ def main() -> None:
         "status": "passed",
         "simulation_only": True,
         "energy_error_mev_c": energy_error,
+        "dr_entry": machine.dr_entry,
         "finite_bunch": {
             "particles": finite.input.particles,
             "linac_bt_survival": finite.linac_bt_exit.survival_fraction_from_input,
@@ -99,16 +149,17 @@ def main() -> None:
             "mismatch_y": finite.dr_injection_optics.y.mismatch_to_design,
             "reproducible_entrance_generation": True,
         },
+        "first_turn_kicker_timing_gate": {
+            "synthetic_kick_rad": [1.0e-6, 0.0],
+            "first_turn_orbit_changed": True,
+            "state_reset_after_tracking": True,
+        },
         "reference_long_horizon": {
             "turns": reference.completed_dr_turns,
             "survival": reference.dr_after_turns.survival_fraction_from_input,
             "recorded_turns": list(reference.dr_turn_history_turns),
         },
-        "limitations": [
-            "No surveyed IPZT-to-RING0 handoff or pulsed-kicker calibration.",
-            "No complete physical aperture/loss map.",
-            "Finite-bunch Twiss/emittance is an explicit study input, not measured ATF data.",
-        ],
+        "limitations": list(finite.limitations),
     }, indent=2))
 
 

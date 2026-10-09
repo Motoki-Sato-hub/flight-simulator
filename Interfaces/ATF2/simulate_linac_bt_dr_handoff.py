@@ -43,7 +43,7 @@ class TransverseHandoff:
     Coordinates are ``[x_mm, xp_mrad, y_mm, yp_mrad]``.  The default created
     by :meth:`reference_anchored` is intentionally only an identity map plus
     a design-particle offset.  The SAD BT line already contains its historical
-    septa and nominal BK1R kicker, but a surveyed IPZT-to-RING0 map and the
+    septa and nominal BK1R kicker, but a surveyed IPZT-to-DR-entry map and the
     measured pulsed settings must replace this handoff before it becomes an
     injection model.
     """
@@ -51,6 +51,7 @@ class TransverseHandoff:
     matrix: np.ndarray
     offset_mm_mrad: np.ndarray
     provenance: str
+    target_location: str = "UNSPECIFIED"
     source_dispersion_mm_mrad: np.ndarray | None = None
     target_dispersion_mm_mrad: np.ndarray | None = None
     reference_momentum_mev_c: float | None = None
@@ -60,6 +61,8 @@ class TransverseHandoff:
             raise ValueError("handoff matrix must have shape (4, 4)")
         if np.asarray(self.offset_mm_mrad).shape != (4,):
             raise ValueError("handoff offset must have shape (4,)")
+        if not self.target_location or not self.target_location.strip():
+            raise ValueError("handoff target_location must be a non-empty string")
         dispersions = (self.source_dispersion_mm_mrad, self.target_dispersion_mm_mrad)
         if any(item is not None for item in dispersions):
             if any(item is None for item in dispersions):
@@ -74,11 +77,14 @@ class TransverseHandoff:
         cls,
         source_coordinates: np.ndarray,
         target_coordinates: np.ndarray,
+        *,
+        target_location: str = "KII.1",
     ) -> "TransverseHandoff":
         return cls(
             matrix=np.eye(4),
             offset_mm_mrad=np.asarray(target_coordinates) - np.asarray(source_coordinates),
             provenance="reference-anchored identity map; not a surveyed injection map",
+            target_location=target_location,
         )
 
     @staticmethod
@@ -103,13 +109,14 @@ class TransverseHandoff:
         source_dispersion_mm_mrad: np.ndarray,
         target_dispersion_mm_mrad: np.ndarray,
         reference_momentum_mev_c: float,
+        target_location: str = "KII.1",
         provenance: str | None = None,
     ) -> "TransverseHandoff":
         """Make a zero-phase 4D symplectic Twiss/dispersion matching map.
 
         This maps the *design covariance* at the historical BT endpoint to
-        the chosen DR RING0 reference point.  It is useful as a reproducible
-        optics baseline, but is explicitly not a surveyed IPZT-to-RING0 map:
+        the chosen DR entry point.  It is useful as a reproducible optics
+        baseline, but is explicitly not a surveyed IPZT-to-DR-entry map:
         longitudinal path length, septum/kicker pulse calibration, coupling,
         and an arbitrary betatron phase remain outside this construction.
         """
@@ -132,8 +139,9 @@ class TransverseHandoff:
             provenance=(
                 provenance
                 or "zero-phase symplectic Twiss/dispersion match from SAD BT IPZT "
-                "to RFTrack DR RING0; design-optics baseline, not surveyed injection map"
+                f"to RFTrack DR entry {target_location}; design-optics baseline, not surveyed injection map"
             ),
+            target_location=target_location,
             source_dispersion_mm_mrad=np.asarray(source_dispersion_mm_mrad, dtype=float),
             target_dispersion_mm_mrad=np.asarray(target_dispersion_mm_mrad, dtype=float),
             reference_momentum_mev_c=float(reference_momentum_mev_c),
@@ -177,6 +185,7 @@ class TransverseHandoff:
             "matrix": np.asarray(self.matrix, dtype=float).tolist(),
             "offset_mm_mrad": np.asarray(self.offset_mm_mrad, dtype=float).tolist(),
             "provenance": self.provenance,
+            "target_location": self.target_location,
             "source_dispersion_mm_mrad": (
                 None if self.source_dispersion_mm_mrad is None
                 else np.asarray(self.source_dispersion_mm_mrad, dtype=float).tolist()
@@ -199,6 +208,7 @@ class TransverseHandoff:
         """
         expected = {
             "matrix", "offset_mm_mrad", "provenance",
+            "target_location",
             "source_dispersion_mm_mrad", "target_dispersion_mm_mrad",
             "reference_momentum_mev_c",
         }
@@ -213,6 +223,7 @@ class TransverseHandoff:
             matrix=np.asarray(payload["matrix"], dtype=float),
             offset_mm_mrad=np.asarray(payload["offset_mm_mrad"], dtype=float),
             provenance=str(payload["provenance"]),
+            target_location=str(payload.get("target_location", "UNSPECIFIED")),
             source_dispersion_mm_mrad=(
                 None if payload.get("source_dispersion_mm_mrad") is None else
                 np.asarray(payload["source_dispersion_mm_mrad"], dtype=float)
@@ -295,7 +306,7 @@ def run_handoff_audit(
     target_coordinates = np.asarray(closed_orbit.initial_coordinates, dtype=float)
     if handoff is None:
         handoff = TransverseHandoff.reference_anchored(
-            source_coordinates, target_coordinates
+            source_coordinates, target_coordinates, target_location="RING0$START"
         )
     # The absolute flight time from the transport is intentionally discarded:
     # longitudinal capture/RF synchronization is not in the current DR model.

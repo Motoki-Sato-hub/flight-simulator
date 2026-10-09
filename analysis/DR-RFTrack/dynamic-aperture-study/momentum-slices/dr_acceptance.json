@@ -1,0 +1,2179 @@
+{
+  "simulation_only": true,
+  "entry": "KII.1",
+  "turns": 10,
+  "kind": "damped_RF_capture",
+  "rf_mode": "equilibrium",
+  "quantum_radiation": false,
+  "synchronous_orbit": [
+    -0.0058993868838861496,
+    -0.004440148420380577,
+    3.8799741955912188e-19,
+    -4.34669408828561e-19,
+    17.37387822965448,
+    1295.5166544864576
+  ],
+  "twiss_beta_m_alpha": [
+    2.7416477958898766,
+    -0.9777463291968206,
+    8.522386741410287,
+    7.275085079329997
+  ],
+  "aperture_screen": "none",
+  "physical_apertures": {},
+  "numerical_guards": {
+    "position_mm": 100.0,
+    "angle_mrad": 100.0,
+    "checked_at": "entry and turn boundaries"
+  },
+  "time_offset_mm_c": 0.0,
+  "literature_reference": {
+    "source": "NLC/ATF damping-ring design report, Chapter 3.3.3, https://cds.cern.ch/record/450524/files/slac-r-559.pdf",
+    "historical_dynamic_aperture_mm": 6.0,
+    "used_as_tracking_cut": false
+  },
+  "limitations": [
+    "Finite-turn sampled model acceptance, not measured ATF dynamic aperture or final transmission.",
+    "Default RF/radiation capture is not conservative Hamiltonian dynamic aperture; RF-off mode is not longitudinal capture.",
+    "Historical +/-6 mm has an unspecified observation point here and is not a KII.1 acceptance limit.",
+    "Physical apertures are absent or a partial assumed-shape historical KIX screen, never a complete chamber model.",
+    "No calibrated field-error ensemble, full nonlinear wiggler field, or injection pulse is included.",
+    "The optional pipeline uses the provisional BT-to-DR Twiss/dispersion handoff and ideal mean timing alignment.",
+    "Each probe is independent, with no charge-dependent collective loss mechanisms; injected macroparticles are assumed equally weighted."
+  ],
+  "cases": [
+    {
+      "radius_mm": 0.0,
+      "ray_deg": 0.0,
+      "phase_x_deg": 0.0,
+      "phase_y_deg": 0.0,
+      "delta_p": 0.0,
+      "initial_mm_mrad_mm_c_mev_c": [
+        -0.0058993868838861496,
+        -0.004440148420380577,
+        3.8799741955912188e-19,
+        -4.34669408828561e-19,
+        17.37387822965448,
+        1295.5166544864576
+      ],
+      "status": "survived",
+      "survived": true,
+      "first_rejected_turn": null,
+      "completed_turns": 10,
+      "max_entry_displacement_mm_mrad": [
+        3.05611901807272e-06,
+        8.286183320604934e-07,
+        1.1463767901831764e-18,
+        1.135730067075264e-18
+      ]
+    },
+    {
+      "radius_mm": 1.0,
+      "ray_deg": 0.0,
+      "phase_x_deg": 0.0,
+      "phase_y_deg": 0.0,
+      "delta_p": 0.0,
+      "initial_mm_mrad_mm_c_mev_c": [
+        0.9941006131161139,
+        0.3521871071529292,
+        3.8799741955912188e-19,
+        -4.34669408828561e-19,
+        17.37387822965448,
+        1295.5166544864576
+      ],
+      "status": "survived",
+      "survived": true,
+      "first_rejected_turn": null,
+      "completed_turns": 10,
+      "max_entry_displacement_mm_mrad": [
+        1.1380181406718088,
+        0.46916870213744444,
+        8.482116313111724e-19,
+        9.497248980551855e-19
+      ]
+    },
+    {
+      "radius_mm": 3.0,
+      "ray_deg": 0.0,
+      "phase_x_deg": 0.0,
+      "phase_y_deg": 0.0,
+      "delta_p": 0.0,
+      "initial_mm_mrad_mm_c_mev_c": [
+        2.994100613116114,
+        1.0654416182995488,
+        3.8799741955912188e-19,
+        -4.34669408828561e-19,
+        17.37387822965448,
+        1295.5166544864576
+      ],
+      "status": "rftrack_loss",
+      "survived": false,
+      "first_rejected_turn": 1,
+      "completed_turns": 1,
+      "max_entry_displacement_mm_mrad": [
+        3.0,
+        1.0698817667199294,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "radius_mm": 0.0,
+      "ray_deg": 0.0,
+      "phase_x_deg": 0.0,
+      "phase_y_deg": 90.0,
+      "delta_p": 0.0,
+      "initial_mm_mrad_mm_c_mev_c": [
+        -0.0058993868838861496,
+        -0.004440148420380577,
+        3.8799741955912188e-19,
+        -4.34669408828561e-19,
+        17.37387822965448,
+        1295.5166544864576
+      ],
+      "status": "survived",
+      "survived": true,
+      "first_rejected_turn": null,
+      "completed_turns": 10,
+      "max_entry_displacement_mm_mrad": [
+        3.05611901807272e-06,
+        8.286183320604934e-07,
+        1.1463767901831764e-18,
+        1.135730067075264e-18
+      ]
+    },
+    {
+      "radius_mm": 1.0,
+      "ray_deg": 0.0,
+      "phase_x_deg": 0.0,
+      "phase_y_deg": 90.0,
+      "delta_p": 0.0,
+      "initial_mm_mrad_mm_c_mev_c": [
+        0.9941006131161139,
+        0.3521871071529292,
+        3.8799741955912188e-19,
+        -4.34669408828561e-19,
+        17.37387822965448,
+        1295.5166544864576
+      ],
+      "status": "survived",
+      "survived": true,
+      "first_rejected_turn": null,
+      "completed_turns": 10,
+      "max_entry_displacement_mm_mrad": [
+        1.1380181406718088,
+        0.46916870213744444,
+        8.482116313111724e-19,
+        9.497248980551855e-19
+      ]
+    },
+    {
+      "radius_mm": 3.0,
+      "ray_deg": 0.0,
+      "phase_x_deg": 0.0,
+      "phase_y_deg": 90.0,
+      "delta_p": 0.0,
+      "initial_mm_mrad_mm_c_mev_c": [
+        2.994100613116114,
+        1.0654416182995488,
+        3.8799741955912188e-19,
+        -4.34669408828561e-19,
+        17.37387822965448,
+        1295.5166544864576
+      ],
+      "status": "rftrack_loss",
+      "survived": false,
+      "first_rejected_turn": 1,
+      "completed_turns": 1,
+      "max_entry_displacement_mm_mrad": [
+        3.0,
+        1.0698817667199294,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "radius_mm": 0.0,
+      "ray_deg": 0.0,
+      "phase_x_deg": 90.0,
+      "phase_y_deg": 0.0,
+      "delta_p": 0.0,
+      "initial_mm_mrad_mm_c_mev_c": [
+        -0.0058993868838861496,
+        -0.004440148420380577,
+        3.8799741955912188e-19,
+        -4.34669408828561e-19,
+        17.37387822965448,
+        1295.5166544864576
+      ],
+      "status": "survived",
+      "survived": true,
+      "first_rejected_turn": null,
+      "completed_turns": 10,
+      "max_entry_displacement_mm_mrad": [
+        3.05611901807272e-06,
+        8.286183320604934e-07,
+        1.1463767901831764e-18,
+        1.135730067075264e-18
+      ]
+    },
+    {
+      "radius_mm": 1.0,
+      "ray_deg": 0.0,
+      "phase_x_deg": 90.0,
+      "phase_y_deg": 0.0,
+      "delta_p": 0.0,
+      "initial_mm_mrad_mm_c_mev_c": [
+        -0.005899386883886088,
+        -0.3691843002764809,
+        3.8799741955912188e-19,
+        -4.34669408828561e-19,
+        17.37387822965448,
+        1295.5166544864576
+      ],
+      "status": "survived",
+      "survived": true,
+      "first_rejected_turn": null,
+      "completed_turns": 10,
+      "max_entry_displacement_mm_mrad": [
+        1.4220043795046613,
+        0.6185846223120599,
+        1.1687864999625816e-18,
+        1.1377919380822776e-18
+      ]
+    },
+    {
+      "radius_mm": 3.0,
+      "ray_deg": 0.0,
+      "phase_x_deg": 90.0,
+      "phase_y_deg": 0.0,
+      "delta_p": 0.0,
+      "initial_mm_mrad_mm_c_mev_c": [
+        -0.005899386883885966,
+        -1.0986726039886816,
+        3.8799741955912188e-19,
+        -4.34669408828561e-19,
+        17.37387822965448,
+        1295.5166544864576
+      ],
+      "status": "rftrack_loss",
+      "survived": false,
+      "first_rejected_turn": 1,
+      "completed_turns": 1,
+      "max_entry_displacement_mm_mrad": [
+        1.8388068845354155e-16,
+        1.094232455568301,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "radius_mm": 0.0,
+      "ray_deg": 0.0,
+      "phase_x_deg": 90.0,
+      "phase_y_deg": 90.0,
+      "delta_p": 0.0,
+      "initial_mm_mrad_mm_c_mev_c": [
+        -0.0058993868838861496,
+        -0.004440148420380577,
+        3.8799741955912188e-19,
+        -4.34669408828561e-19,
+        17.37387822965448,
+        1295.5166544864576
+      ],
+      "status": "survived",
+      "survived": true,
+      "first_rejected_turn": null,
+      "completed_turns": 10,
+      "max_entry_displacement_mm_mrad": [
+        3.05611901807272e-06,
+        8.286183320604934e-07,
+        1.1463767901831764e-18,
+        1.135730067075264e-18
+      ]
+    },
+    {
+      "radius_mm": 1.0,
+      "ray_deg": 0.0,
+      "phase_x_deg": 90.0,
+      "phase_y_deg": 90.0,
+      "delta_p": 0.0,
+      "initial_mm_mrad_mm_c_mev_c": [
+        -0.005899386883886088,
+        -0.3691843002764809,
+        3.8799741955912188e-19,
+        -4.34669408828561e-19,
+        17.37387822965448,
+        1295.5166544864576
+      ],
+      "status": "survived",
+      "survived": true,
+      "first_rejected_turn": null,
+      "completed_turns": 10,
+      "max_entry_displacement_mm_mrad": [
+        1.4220043795046613,
+        0.6185846223120599,
+        1.1687864999625816e-18,
+        1.1377919380822776e-18
+      ]
+    },
+    {
+      "radius_mm": 3.0,
+      "ray_deg": 0.0,
+      "phase_x_deg": 90.0,
+      "phase_y_deg": 90.0,
+      "delta_p": 0.0,
+      "initial_mm_mrad_mm_c_mev_c": [
+        -0.005899386883885966,
+        -1.0986726039886816,
+        3.8799741955912188e-19,
+        -4.34669408828561e-19,
+        17.37387822965448,
+        1295.5166544864576
+      ],
+      "status": "rftrack_loss",
+      "survived": false,
+      "first_rejected_turn": 1,
+      "completed_turns": 1,
+      "max_entry_displacement_mm_mrad": [
+        1.8388068845354155e-16,
+        1.094232455568301,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "radius_mm": 0.0,
+      "ray_deg": 90.0,
+      "phase_x_deg": 0.0,
+      "phase_y_deg": 0.0,
+      "delta_p": 0.0,
+      "initial_mm_mrad_mm_c_mev_c": [
+        -0.0058993868838861496,
+        -0.004440148420380577,
+        3.8799741955912188e-19,
+        -4.34669408828561e-19,
+        17.37387822965448,
+        1295.5166544864576
+      ],
+      "status": "survived",
+      "survived": true,
+      "first_rejected_turn": null,
+      "completed_turns": 10,
+      "max_entry_displacement_mm_mrad": [
+        3.05611901807272e-06,
+        8.286183320604934e-07,
+        1.1463767901831764e-18,
+        1.135730067075264e-18
+      ]
+    },
+    {
+      "radius_mm": 1.0,
+      "ray_deg": 90.0,
+      "phase_x_deg": 0.0,
+      "phase_y_deg": 0.0,
+      "delta_p": 0.0,
+      "initial_mm_mrad_mm_c_mev_c": [
+        -0.005899386883886088,
+        -0.0044401484203805556,
+        1.0,
+        -0.8536440905668303,
+        17.37387822965448,
+        1295.5166544864576
+      ],
+      "status": "survived",
+      "survived": true,
+      "first_rejected_turn": null,
+      "completed_turns": 10,
+      "max_entry_displacement_mm_mrad": [
+        0.3986646896834972,
+        0.14982106758223082,
+        1.0,
+        0.8536440905668303
+      ]
+    },
+    {
+      "radius_mm": 3.0,
+      "ray_deg": 90.0,
+      "phase_x_deg": 0.0,
+      "phase_y_deg": 0.0,
+      "delta_p": 0.0,
+      "initial_mm_mrad_mm_c_mev_c": [
+        -0.005899386883885966,
+        -0.004440148420380511,
+        3.0,
+        -2.5609322717004908,
+        17.37387822965448,
+        1295.5166544864576
+      ],
+      "status": "survived",
+      "survived": true,
+      "first_rejected_turn": null,
+      "completed_turns": 10,
+      "max_entry_displacement_mm_mrad": [
+        0.8833565633813966,
+        0.31112776677777443,
+        3.2752888749180977,
+        2.9624047928899326
+      ]
+    },
+    {
+      "radius_mm": 0.0,
+      "ray_deg": 90.0,
+      "phase_x_deg": 0.0,
+      "phase_y_deg": 90.0,
+      "delta_p": 0.0,
+      "initial_mm_mrad_mm_c_mev_c": [
+        -0.0058993868838861496,
+        -0.004440148420380577,
+        3.8799741955912188e-19,
+        -4.34669408828561e-19,
+        17.37387822965448,
+        1295.5166544864576
+      ],
+      "status": "survived",
+      "survived": true,
+      "first_rejected_turn": null,
+      "completed_turns": 10,
+      "max_entry_displacement_mm_mrad": [
+        3.05611901807272e-06,
+        8.286183320604934e-07,
+        1.1463767901831764e-18,
+        1.135730067075264e-18
+      ]
+    },
+    {
+      "radius_mm": 1.0,
+      "ray_deg": 90.0,
+      "phase_x_deg": 0.0,
+      "phase_y_deg": 90.0,
+      "delta_p": 0.0,
+      "initial_mm_mrad_mm_c_mev_c": [
+        -0.005899386883886088,
+        -0.0044401484203805556,
+        6.162033737692678e-17,
+        -0.11733802165313612,
+        17.37387822965448,
+        1295.5166544864576
+      ],
+      "status": "survived",
+      "survived": true,
+      "first_rejected_turn": null,
+      "completed_turns": 10,
+      "max_entry_displacement_mm_mrad": [
+        0.3071507140291993,
+        0.10103540671596015,
+        0.8646056224273346,
+        0.799017137376025
+      ]
+    },
+    {
+      "radius_mm": 3.0,
+      "ray_deg": 90.0,
+      "phase_x_deg": 0.0,
+      "phase_y_deg": 90.0,
+      "delta_p": 0.0,
+      "initial_mm_mrad_mm_c_mev_c": [
+        -0.005899386883885966,
+        -0.004440148420380511,
+        1.840850172916621e-16,
+        -0.35201406495940835,
+        17.37387822965448,
+        1295.5166544864576
+      ],
+      "status": "survived",
+      "survived": true,
+      "first_rejected_turn": null,
+      "completed_turns": 10,
+      "max_entry_displacement_mm_mrad": [
+        0.5049264545049874,
+        0.289939976434761,
+        2.3740604819629842,
+        2.154497697514075
+      ]
+    },
+    {
+      "radius_mm": 0.0,
+      "ray_deg": 90.0,
+      "phase_x_deg": 90.0,
+      "phase_y_deg": 0.0,
+      "delta_p": 0.0,
+      "initial_mm_mrad_mm_c_mev_c": [
+        -0.0058993868838861496,
+        -0.004440148420380577,
+        3.8799741955912188e-19,
+        -4.34669408828561e-19,
+        17.37387822965448,
+        1295.5166544864576
+      ],
+      "status": "survived",
+      "survived": true,
+      "first_rejected_turn": null,
+      "completed_turns": 10,
+      "max_entry_displacement_mm_mrad": [
+        3.05611901807272e-06,
+        8.286183320604934e-07,
+        1.1463767901831764e-18,
+        1.135730067075264e-18
+      ]
+    },
+    {
+      "radius_mm": 1.0,
+      "ray_deg": 90.0,
+      "phase_x_deg": 90.0,
+      "phase_y_deg": 0.0,
+      "delta_p": 0.0,
+      "initial_mm_mrad_mm_c_mev_c": [
+        -0.0058993868838861496,
+        -0.0044401484203806,
+        1.0,
+        -0.8536440905668303,
+        17.37387822965448,
+        1295.5166544864576
+      ],
+      "status": "survived",
+      "survived": true,
+      "first_rejected_turn": null,
+      "completed_turns": 10,
+      "max_entry_displacement_mm_mrad": [
+        0.398664689683366,
+        0.14982106758218586,
+        1.0,
+        0.8536440905668303
+      ]
+    },
+    {
+      "radius_mm": 3.0,
+      "ray_deg": 90.0,
+      "phase_x_deg": 90.0,
+      "phase_y_deg": 0.0,
+      "delta_p": 0.0,
+      "initial_mm_mrad_mm_c_mev_c": [
+        -0.0058993868838861496,
+        -0.004440148420380644,
+        3.0,
+        -2.5609322717004908,
+        17.37387822965448,
+        1295.5166544864576
+      ],
+      "status": "survived",
+      "survived": true,
+      "first_rejected_turn": null,
+      "completed_turns": 10,
+      "max_entry_displacement_mm_mrad": [
+        0.8833565633813966,
+        0.31112776677777443,
+        3.2752888749180977,
+        2.9624047928899326
+      ]
+    },
+    {
+      "radius_mm": 0.0,
+      "ray_deg": 90.0,
+      "phase_x_deg": 90.0,
+      "phase_y_deg": 90.0,
+      "delta_p": 0.0,
+      "initial_mm_mrad_mm_c_mev_c": [
+        -0.0058993868838861496,
+        -0.004440148420380577,
+        3.8799741955912188e-19,
+        -4.34669408828561e-19,
+        17.37387822965448,
+        1295.5166544864576
+      ],
+      "status": "survived",
+      "survived": true,
+      "first_rejected_turn": null,
+      "completed_turns": 10,
+      "max_entry_displacement_mm_mrad": [
+        3.05611901807272e-06,
+        8.286183320604934e-07,
+        1.1463767901831764e-18,
+        1.135730067075264e-18
+      ]
+    },
+    {
+      "radius_mm": 1.0,
+      "ray_deg": 90.0,
+      "phase_x_deg": 90.0,
+      "phase_y_deg": 90.0,
+      "delta_p": 0.0,
+      "initial_mm_mrad_mm_c_mev_c": [
+        -0.0058993868838861496,
+        -0.0044401484203806,
+        6.162033737692678e-17,
+        -0.11733802165313612,
+        17.37387822965448,
+        1295.5166544864576
+      ],
+      "status": "survived",
+      "survived": true,
+      "first_rejected_turn": null,
+      "completed_turns": 10,
+      "max_entry_displacement_mm_mrad": [
+        0.3071507140292471,
+        0.10103540671597122,
+        0.8646056224273464,
+        0.799017137376037
+      ]
+    },
+    {
+      "radius_mm": 3.0,
+      "ray_deg": 90.0,
+      "phase_x_deg": 90.0,
+      "phase_y_deg": 90.0,
+      "delta_p": 0.0,
+      "initial_mm_mrad_mm_c_mev_c": [
+        -0.0058993868838861496,
+        -0.004440148420380644,
+        1.840850172916621e-16,
+        -0.35201406495940835,
+        17.37387822965448,
+        1295.5166544864576
+      ],
+      "status": "survived",
+      "survived": true,
+      "first_rejected_turn": null,
+      "completed_turns": 10,
+      "max_entry_displacement_mm_mrad": [
+        0.5049264545050224,
+        0.289939976434786,
+        2.374060481963658,
+        2.15449769751456
+      ]
+    },
+    {
+      "radius_mm": 0.0,
+      "ray_deg": 0.0,
+      "phase_x_deg": 0.0,
+      "phase_y_deg": 0.0,
+      "delta_p": -0.005,
+      "initial_mm_mrad_mm_c_mev_c": [
+        -0.007390617404788225,
+        -0.005155763005746246,
+        3.8799741955912188e-19,
+        -4.34669408828561e-19,
+        17.37387822965448,
+        1289.0390712140254
+      ],
+      "status": "survived",
+      "survived": true,
+      "first_rejected_turn": null,
+      "completed_turns": 10,
+      "max_entry_displacement_mm_mrad": [
+        0.1294352313333771,
+        0.08172427898605733,
+        1.385620232664058e-16,
+        1.3870989864029024e-16
+      ]
+    },
+    {
+      "radius_mm": 1.0,
+      "ray_deg": 0.0,
+      "phase_x_deg": 0.0,
+      "phase_y_deg": 0.0,
+      "delta_p": -0.005,
+      "initial_mm_mrad_mm_c_mev_c": [
+        0.9926093825952118,
+        0.35147149256756355,
+        3.8799741955912188e-19,
+        -4.34669408828561e-19,
+        17.37387822965448,
+        1289.0390712140254
+      ],
+      "status": "survived",
+      "survived": true,
+      "first_rejected_turn": null,
+      "completed_turns": 10,
+      "max_entry_displacement_mm_mrad": [
+        1.150830128290822,
+        0.49352322732404974,
+        5.5910309023888904e-14,
+        7.100907479052387e-14
+      ]
+    },
+    {
+      "radius_mm": 3.0,
+      "ray_deg": 0.0,
+      "phase_x_deg": 0.0,
+      "phase_y_deg": 0.0,
+      "delta_p": -0.005,
+      "initial_mm_mrad_mm_c_mev_c": [
+        2.992609382595212,
+        1.064726003714183,
+        3.8799741955912188e-19,
+        -4.34669408828561e-19,
+        17.37387822965448,
+        1289.0390712140254
+      ],
+      "status": "rftrack_loss",
+      "survived": false,
+      "first_rejected_turn": 1,
+      "completed_turns": 1,
+      "max_entry_displacement_mm_mrad": [
+        2.998508769479098,
+        1.0691661521345637,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "radius_mm": 0.0,
+      "ray_deg": 0.0,
+      "phase_x_deg": 0.0,
+      "phase_y_deg": 90.0,
+      "delta_p": -0.005,
+      "initial_mm_mrad_mm_c_mev_c": [
+        -0.007390617404788225,
+        -0.005155763005746246,
+        3.8799741955912188e-19,
+        -4.34669408828561e-19,
+        17.37387822965448,
+        1289.0390712140254
+      ],
+      "status": "survived",
+      "survived": true,
+      "first_rejected_turn": null,
+      "completed_turns": 10,
+      "max_entry_displacement_mm_mrad": [
+        0.1294352313333771,
+        0.08172427898605733,
+        1.385620232664058e-16,
+        1.3870989864029024e-16
+      ]
+    },
+    {
+      "radius_mm": 1.0,
+      "ray_deg": 0.0,
+      "phase_x_deg": 0.0,
+      "phase_y_deg": 90.0,
+      "delta_p": -0.005,
+      "initial_mm_mrad_mm_c_mev_c": [
+        0.9926093825952118,
+        0.35147149256756355,
+        3.8799741955912188e-19,
+        -4.34669408828561e-19,
+        17.37387822965448,
+        1289.0390712140254
+      ],
+      "status": "survived",
+      "survived": true,
+      "first_rejected_turn": null,
+      "completed_turns": 10,
+      "max_entry_displacement_mm_mrad": [
+        1.150830128290822,
+        0.49352322732404974,
+        5.5910309023888904e-14,
+        7.100907479052387e-14
+      ]
+    },
+    {
+      "radius_mm": 3.0,
+      "ray_deg": 0.0,
+      "phase_x_deg": 0.0,
+      "phase_y_deg": 90.0,
+      "delta_p": -0.005,
+      "initial_mm_mrad_mm_c_mev_c": [
+        2.992609382595212,
+        1.064726003714183,
+        3.8799741955912188e-19,
+        -4.34669408828561e-19,
+        17.37387822965448,
+        1289.0390712140254
+      ],
+      "status": "rftrack_loss",
+      "survived": false,
+      "first_rejected_turn": 1,
+      "completed_turns": 1,
+      "max_entry_displacement_mm_mrad": [
+        2.998508769479098,
+        1.0691661521345637,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "radius_mm": 0.0,
+      "ray_deg": 0.0,
+      "phase_x_deg": 90.0,
+      "phase_y_deg": 0.0,
+      "delta_p": -0.005,
+      "initial_mm_mrad_mm_c_mev_c": [
+        -0.007390617404788225,
+        -0.005155763005746246,
+        3.8799741955912188e-19,
+        -4.34669408828561e-19,
+        17.37387822965448,
+        1289.0390712140254
+      ],
+      "status": "survived",
+      "survived": true,
+      "first_rejected_turn": null,
+      "completed_turns": 10,
+      "max_entry_displacement_mm_mrad": [
+        0.1294352313333771,
+        0.08172427898605733,
+        1.385620232664058e-16,
+        1.3870989864029024e-16
+      ]
+    },
+    {
+      "radius_mm": 1.0,
+      "ray_deg": 0.0,
+      "phase_x_deg": 90.0,
+      "phase_y_deg": 0.0,
+      "delta_p": -0.005,
+      "initial_mm_mrad_mm_c_mev_c": [
+        -0.007390617404788163,
+        -0.3698999148618466,
+        3.8799741955912188e-19,
+        -4.34669408828561e-19,
+        17.37387822965448,
+        1289.0390712140254
+      ],
+      "status": "survived",
+      "survived": true,
+      "first_rejected_turn": null,
+      "completed_turns": 10,
+      "max_entry_displacement_mm_mrad": [
+        1.1755554762329645,
+        0.5034646193238995,
+        5.97996962959787e-14,
+        6.515218703827811e-14
+      ]
+    },
+    {
+      "radius_mm": 3.0,
+      "ray_deg": 0.0,
+      "phase_x_deg": 90.0,
+      "phase_y_deg": 0.0,
+      "delta_p": -0.005,
+      "initial_mm_mrad_mm_c_mev_c": [
+        -0.007390617404788041,
+        -1.0993882185740473,
+        3.8799741955912188e-19,
+        -4.34669408828561e-19,
+        17.37387822965448,
+        1289.0390712140254
+      ],
+      "status": "rftrack_loss",
+      "survived": false,
+      "first_rejected_turn": 1,
+      "completed_turns": 1,
+      "max_entry_displacement_mm_mrad": [
+        0.0014912305209018916,
+        1.0949480701536667,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "radius_mm": 0.0,
+      "ray_deg": 0.0,
+      "phase_x_deg": 90.0,
+      "phase_y_deg": 90.0,
+      "delta_p": -0.005,
+      "initial_mm_mrad_mm_c_mev_c": [
+        -0.007390617404788225,
+        -0.005155763005746246,
+        3.8799741955912188e-19,
+        -4.34669408828561e-19,
+        17.37387822965448,
+        1289.0390712140254
+      ],
+      "status": "survived",
+      "survived": true,
+      "first_rejected_turn": null,
+      "completed_turns": 10,
+      "max_entry_displacement_mm_mrad": [
+        0.1294352313333771,
+        0.08172427898605733,
+        1.385620232664058e-16,
+        1.3870989864029024e-16
+      ]
+    },
+    {
+      "radius_mm": 1.0,
+      "ray_deg": 0.0,
+      "phase_x_deg": 90.0,
+      "phase_y_deg": 90.0,
+      "delta_p": -0.005,
+      "initial_mm_mrad_mm_c_mev_c": [
+        -0.007390617404788163,
+        -0.3698999148618466,
+        3.8799741955912188e-19,
+        -4.34669408828561e-19,
+        17.37387822965448,
+        1289.0390712140254
+      ],
+      "status": "survived",
+      "survived": true,
+      "first_rejected_turn": null,
+      "completed_turns": 10,
+      "max_entry_displacement_mm_mrad": [
+        1.1755554762329645,
+        0.5034646193238995,
+        5.97996962959787e-14,
+        6.515218703827811e-14
+      ]
+    },
+    {
+      "radius_mm": 3.0,
+      "ray_deg": 0.0,
+      "phase_x_deg": 90.0,
+      "phase_y_deg": 90.0,
+      "delta_p": -0.005,
+      "initial_mm_mrad_mm_c_mev_c": [
+        -0.007390617404788041,
+        -1.0993882185740473,
+        3.8799741955912188e-19,
+        -4.34669408828561e-19,
+        17.37387822965448,
+        1289.0390712140254
+      ],
+      "status": "rftrack_loss",
+      "survived": false,
+      "first_rejected_turn": 1,
+      "completed_turns": 1,
+      "max_entry_displacement_mm_mrad": [
+        0.0014912305209018916,
+        1.0949480701536667,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "radius_mm": 0.0,
+      "ray_deg": 90.0,
+      "phase_x_deg": 0.0,
+      "phase_y_deg": 0.0,
+      "delta_p": -0.005,
+      "initial_mm_mrad_mm_c_mev_c": [
+        -0.007390617404788225,
+        -0.005155763005746246,
+        3.8799741955912188e-19,
+        -4.34669408828561e-19,
+        17.37387822965448,
+        1289.0390712140254
+      ],
+      "status": "survived",
+      "survived": true,
+      "first_rejected_turn": null,
+      "completed_turns": 10,
+      "max_entry_displacement_mm_mrad": [
+        0.1294352313333771,
+        0.08172427898605733,
+        1.385620232664058e-16,
+        1.3870989864029024e-16
+      ]
+    },
+    {
+      "radius_mm": 1.0,
+      "ray_deg": 90.0,
+      "phase_x_deg": 0.0,
+      "phase_y_deg": 0.0,
+      "delta_p": -0.005,
+      "initial_mm_mrad_mm_c_mev_c": [
+        -0.007390617404788163,
+        -0.0051557630057462245,
+        1.0,
+        -0.8536440905668303,
+        17.37387822965448,
+        1289.0390712140254
+      ],
+      "status": "survived",
+      "survived": true,
+      "first_rejected_turn": null,
+      "completed_turns": 10,
+      "max_entry_displacement_mm_mrad": [
+        0.19518623243924968,
+        0.0899784874464258,
+        2.371302531667325,
+        2.2762300313023607
+      ]
+    },
+    {
+      "radius_mm": 3.0,
+      "ray_deg": 90.0,
+      "phase_x_deg": 0.0,
+      "phase_y_deg": 0.0,
+      "delta_p": -0.005,
+      "initial_mm_mrad_mm_c_mev_c": [
+        -0.007390617404788041,
+        -0.00515576300574618,
+        3.0,
+        -2.5609322717004908,
+        17.37387822965448,
+        1289.0390712140254
+      ],
+      "status": "rftrack_loss",
+      "survived": false,
+      "first_rejected_turn": 9,
+      "completed_turns": 9,
+      "max_entry_displacement_mm_mrad": [
+        2.1433859444724987,
+        0.6111551013397639,
+        4.79273699518445,
+        4.401101017515496
+      ]
+    },
+    {
+      "radius_mm": 0.0,
+      "ray_deg": 90.0,
+      "phase_x_deg": 0.0,
+      "phase_y_deg": 90.0,
+      "delta_p": -0.005,
+      "initial_mm_mrad_mm_c_mev_c": [
+        -0.007390617404788225,
+        -0.005155763005746246,
+        3.8799741955912188e-19,
+        -4.34669408828561e-19,
+        17.37387822965448,
+        1289.0390712140254
+      ],
+      "status": "survived",
+      "survived": true,
+      "first_rejected_turn": null,
+      "completed_turns": 10,
+      "max_entry_displacement_mm_mrad": [
+        0.1294352313333771,
+        0.08172427898605733,
+        1.385620232664058e-16,
+        1.3870989864029024e-16
+      ]
+    },
+    {
+      "radius_mm": 1.0,
+      "ray_deg": 90.0,
+      "phase_x_deg": 0.0,
+      "phase_y_deg": 90.0,
+      "delta_p": -0.005,
+      "initial_mm_mrad_mm_c_mev_c": [
+        -0.007390617404788163,
+        -0.0051557630057462245,
+        6.162033737692678e-17,
+        -0.11733802165313612,
+        17.37387822965448,
+        1289.0390712140254
+      ],
+      "status": "survived",
+      "survived": true,
+      "first_rejected_turn": null,
+      "completed_turns": 10,
+      "max_entry_displacement_mm_mrad": [
+        0.12039072191450138,
+        0.05249075722709482,
+        2.2429140876103713,
+        2.167239497772118
+      ]
+    },
+    {
+      "radius_mm": 3.0,
+      "ray_deg": 90.0,
+      "phase_x_deg": 0.0,
+      "phase_y_deg": 90.0,
+      "delta_p": -0.005,
+      "initial_mm_mrad_mm_c_mev_c": [
+        -0.007390617404788041,
+        -0.00515576300574618,
+        1.840850172916621e-16,
+        -0.35201406495940835,
+        17.37387822965448,
+        1289.0390712140254
+      ],
+      "status": "rftrack_loss",
+      "survived": false,
+      "first_rejected_turn": 10,
+      "completed_turns": 10,
+      "max_entry_displacement_mm_mrad": [
+        1.7969060133866512,
+        0.5386088170386826,
+        4.9800403279545495,
+        4.600803722244948
+      ]
+    },
+    {
+      "radius_mm": 0.0,
+      "ray_deg": 90.0,
+      "phase_x_deg": 90.0,
+      "phase_y_deg": 0.0,
+      "delta_p": -0.005,
+      "initial_mm_mrad_mm_c_mev_c": [
+        -0.007390617404788225,
+        -0.005155763005746246,
+        3.8799741955912188e-19,
+        -4.34669408828561e-19,
+        17.37387822965448,
+        1289.0390712140254
+      ],
+      "status": "survived",
+      "survived": true,
+      "first_rejected_turn": null,
+      "completed_turns": 10,
+      "max_entry_displacement_mm_mrad": [
+        0.1294352313333771,
+        0.08172427898605733,
+        1.385620232664058e-16,
+        1.3870989864029024e-16
+      ]
+    },
+    {
+      "radius_mm": 1.0,
+      "ray_deg": 90.0,
+      "phase_x_deg": 90.0,
+      "phase_y_deg": 0.0,
+      "delta_p": -0.005,
+      "initial_mm_mrad_mm_c_mev_c": [
+        -0.007390617404788225,
+        -0.005155763005746269,
+        1.0,
+        -0.8536440905668303,
+        17.37387822965448,
+        1289.0390712140254
+      ],
+      "status": "survived",
+      "survived": true,
+      "first_rejected_turn": null,
+      "completed_turns": 10,
+      "max_entry_displacement_mm_mrad": [
+        0.19518623243924968,
+        0.0899784874464258,
+        2.371302531667325,
+        2.2762300313023607
+      ]
+    },
+    {
+      "radius_mm": 3.0,
+      "ray_deg": 90.0,
+      "phase_x_deg": 90.0,
+      "phase_y_deg": 0.0,
+      "delta_p": -0.005,
+      "initial_mm_mrad_mm_c_mev_c": [
+        -0.007390617404788225,
+        -0.005155763005746313,
+        3.0,
+        -2.5609322717004908,
+        17.37387822965448,
+        1289.0390712140254
+      ],
+      "status": "rftrack_loss",
+      "survived": false,
+      "first_rejected_turn": 9,
+      "completed_turns": 9,
+      "max_entry_displacement_mm_mrad": [
+        2.1433859444724987,
+        0.6111551013397639,
+        4.79273699518445,
+        4.401101017515496
+      ]
+    },
+    {
+      "radius_mm": 0.0,
+      "ray_deg": 90.0,
+      "phase_x_deg": 90.0,
+      "phase_y_deg": 90.0,
+      "delta_p": -0.005,
+      "initial_mm_mrad_mm_c_mev_c": [
+        -0.007390617404788225,
+        -0.005155763005746246,
+        3.8799741955912188e-19,
+        -4.34669408828561e-19,
+        17.37387822965448,
+        1289.0390712140254
+      ],
+      "status": "survived",
+      "survived": true,
+      "first_rejected_turn": null,
+      "completed_turns": 10,
+      "max_entry_displacement_mm_mrad": [
+        0.1294352313333771,
+        0.08172427898605733,
+        1.385620232664058e-16,
+        1.3870989864029024e-16
+      ]
+    },
+    {
+      "radius_mm": 1.0,
+      "ray_deg": 90.0,
+      "phase_x_deg": 90.0,
+      "phase_y_deg": 90.0,
+      "delta_p": -0.005,
+      "initial_mm_mrad_mm_c_mev_c": [
+        -0.007390617404788225,
+        -0.005155763005746269,
+        6.162033737692678e-17,
+        -0.11733802165313612,
+        17.37387822965448,
+        1289.0390712140254
+      ],
+      "status": "survived",
+      "survived": true,
+      "first_rejected_turn": null,
+      "completed_turns": 10,
+      "max_entry_displacement_mm_mrad": [
+        0.12039072191450138,
+        0.05249075722709482,
+        2.2429140876103713,
+        2.167239497772118
+      ]
+    },
+    {
+      "radius_mm": 3.0,
+      "ray_deg": 90.0,
+      "phase_x_deg": 90.0,
+      "phase_y_deg": 90.0,
+      "delta_p": -0.005,
+      "initial_mm_mrad_mm_c_mev_c": [
+        -0.007390617404788225,
+        -0.005155763005746313,
+        1.840850172916621e-16,
+        -0.35201406495940835,
+        17.37387822965448,
+        1289.0390712140254
+      ],
+      "status": "rftrack_loss",
+      "survived": false,
+      "first_rejected_turn": 10,
+      "completed_turns": 10,
+      "max_entry_displacement_mm_mrad": [
+        1.7969060133903687,
+        0.5386088170287915,
+        4.98004032795855,
+        4.600803722249619
+      ]
+    },
+    {
+      "radius_mm": 0.0,
+      "ray_deg": 0.0,
+      "phase_x_deg": 0.0,
+      "phase_y_deg": 0.0,
+      "delta_p": 0.005,
+      "initial_mm_mrad_mm_c_mev_c": [
+        -0.004408156362984074,
+        -0.0037245338350149083,
+        3.8799741955912188e-19,
+        -4.34669408828561e-19,
+        17.37387822965448,
+        1301.9942377588898
+      ],
+      "status": "survived",
+      "survived": true,
+      "first_rejected_turn": null,
+      "completed_turns": 10,
+      "max_entry_displacement_mm_mrad": [
+        0.012644488017202174,
+        0.007702000613345342,
+        1.4843640966352312e-17,
+        1.0462862331606358e-17
+      ]
+    },
+    {
+      "radius_mm": 1.0,
+      "ray_deg": 0.0,
+      "phase_x_deg": 0.0,
+      "phase_y_deg": 0.0,
+      "delta_p": 0.005,
+      "initial_mm_mrad_mm_c_mev_c": [
+        0.9955918436370159,
+        0.3529027217382949,
+        3.8799741955912188e-19,
+        -4.34669408828561e-19,
+        17.37387822965448,
+        1301.9942377588898
+      ],
+      "status": "survived",
+      "survived": true,
+      "first_rejected_turn": null,
+      "completed_turns": 10,
+      "max_entry_displacement_mm_mrad": [
+        1.001491230520902,
+        0.4728105070455651,
+        4.3196678316232454e-18,
+        3.88390282402724e-18
+      ]
+    },
+    {
+      "radius_mm": 3.0,
+      "ray_deg": 0.0,
+      "phase_x_deg": 0.0,
+      "phase_y_deg": 0.0,
+      "delta_p": 0.005,
+      "initial_mm_mrad_mm_c_mev_c": [
+        2.995591843637016,
+        1.0661572328849145,
+        3.8799741955912188e-19,
+        -4.34669408828561e-19,
+        17.37387822965448,
+        1301.9942377588898
+      ],
+      "status": "rftrack_loss",
+      "survived": false,
+      "first_rejected_turn": 1,
+      "completed_turns": 1,
+      "max_entry_displacement_mm_mrad": [
+        3.001491230520902,
+        1.0705973813052951,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "radius_mm": 0.0,
+      "ray_deg": 0.0,
+      "phase_x_deg": 0.0,
+      "phase_y_deg": 90.0,
+      "delta_p": 0.005,
+      "initial_mm_mrad_mm_c_mev_c": [
+        -0.004408156362984074,
+        -0.0037245338350149083,
+        3.8799741955912188e-19,
+        -4.34669408828561e-19,
+        17.37387822965448,
+        1301.9942377588898
+      ],
+      "status": "survived",
+      "survived": true,
+      "first_rejected_turn": null,
+      "completed_turns": 10,
+      "max_entry_displacement_mm_mrad": [
+        0.012644488017202174,
+        0.007702000613345342,
+        1.4843640966352312e-17,
+        1.0462862331606358e-17
+      ]
+    },
+    {
+      "radius_mm": 1.0,
+      "ray_deg": 0.0,
+      "phase_x_deg": 0.0,
+      "phase_y_deg": 90.0,
+      "delta_p": 0.005,
+      "initial_mm_mrad_mm_c_mev_c": [
+        0.9955918436370159,
+        0.3529027217382949,
+        3.8799741955912188e-19,
+        -4.34669408828561e-19,
+        17.37387822965448,
+        1301.9942377588898
+      ],
+      "status": "survived",
+      "survived": true,
+      "first_rejected_turn": null,
+      "completed_turns": 10,
+      "max_entry_displacement_mm_mrad": [
+        1.001491230520902,
+        0.4728105070455651,
+        4.3196678316232454e-18,
+        3.88390282402724e-18
+      ]
+    },
+    {
+      "radius_mm": 3.0,
+      "ray_deg": 0.0,
+      "phase_x_deg": 0.0,
+      "phase_y_deg": 90.0,
+      "delta_p": 0.005,
+      "initial_mm_mrad_mm_c_mev_c": [
+        2.995591843637016,
+        1.0661572328849145,
+        3.8799741955912188e-19,
+        -4.34669408828561e-19,
+        17.37387822965448,
+        1301.9942377588898
+      ],
+      "status": "rftrack_loss",
+      "survived": false,
+      "first_rejected_turn": 1,
+      "completed_turns": 1,
+      "max_entry_displacement_mm_mrad": [
+        3.001491230520902,
+        1.0705973813052951,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "radius_mm": 0.0,
+      "ray_deg": 0.0,
+      "phase_x_deg": 90.0,
+      "phase_y_deg": 0.0,
+      "delta_p": 0.005,
+      "initial_mm_mrad_mm_c_mev_c": [
+        -0.004408156362984074,
+        -0.0037245338350149083,
+        3.8799741955912188e-19,
+        -4.34669408828561e-19,
+        17.37387822965448,
+        1301.9942377588898
+      ],
+      "status": "survived",
+      "survived": true,
+      "first_rejected_turn": null,
+      "completed_turns": 10,
+      "max_entry_displacement_mm_mrad": [
+        0.012644488017202174,
+        0.007702000613345342,
+        1.4843640966352312e-17,
+        1.0462862331606358e-17
+      ]
+    },
+    {
+      "radius_mm": 1.0,
+      "ray_deg": 0.0,
+      "phase_x_deg": 90.0,
+      "phase_y_deg": 0.0,
+      "delta_p": 0.005,
+      "initial_mm_mrad_mm_c_mev_c": [
+        -0.0044081563629840125,
+        -0.36846868569111524,
+        3.8799741955912188e-19,
+        -4.34669408828561e-19,
+        17.37387822965448,
+        1301.9942377588898
+      ],
+      "status": "survived",
+      "survived": true,
+      "first_rejected_turn": null,
+      "completed_turns": 10,
+      "max_entry_displacement_mm_mrad": [
+        1.1490385601232709,
+        0.5600664518111331,
+        2.301669067156821e-18,
+        2.1236290292192497e-18
+      ]
+    },
+    {
+      "radius_mm": 3.0,
+      "ray_deg": 0.0,
+      "phase_x_deg": 90.0,
+      "phase_y_deg": 0.0,
+      "delta_p": 0.005,
+      "initial_mm_mrad_mm_c_mev_c": [
+        -0.00440815636298389,
+        -1.0979569894033159,
+        3.8799741955912188e-19,
+        -4.34669408828561e-19,
+        17.37387822965448,
+        1301.9942377588898
+      ],
+      "status": "rftrack_loss",
+      "survived": false,
+      "first_rejected_turn": 1,
+      "completed_turns": 1,
+      "max_entry_displacement_mm_mrad": [
+        0.0014912305209022593,
+        1.0935168409829352,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "radius_mm": 0.0,
+      "ray_deg": 0.0,
+      "phase_x_deg": 90.0,
+      "phase_y_deg": 90.0,
+      "delta_p": 0.005,
+      "initial_mm_mrad_mm_c_mev_c": [
+        -0.004408156362984074,
+        -0.0037245338350149083,
+        3.8799741955912188e-19,
+        -4.34669408828561e-19,
+        17.37387822965448,
+        1301.9942377588898
+      ],
+      "status": "survived",
+      "survived": true,
+      "first_rejected_turn": null,
+      "completed_turns": 10,
+      "max_entry_displacement_mm_mrad": [
+        0.012644488017202174,
+        0.007702000613345342,
+        1.4843640966352312e-17,
+        1.0462862331606358e-17
+      ]
+    },
+    {
+      "radius_mm": 1.0,
+      "ray_deg": 0.0,
+      "phase_x_deg": 90.0,
+      "phase_y_deg": 90.0,
+      "delta_p": 0.005,
+      "initial_mm_mrad_mm_c_mev_c": [
+        -0.0044081563629840125,
+        -0.36846868569111524,
+        3.8799741955912188e-19,
+        -4.34669408828561e-19,
+        17.37387822965448,
+        1301.9942377588898
+      ],
+      "status": "survived",
+      "survived": true,
+      "first_rejected_turn": null,
+      "completed_turns": 10,
+      "max_entry_displacement_mm_mrad": [
+        1.1490385601232709,
+        0.5600664518111331,
+        2.301669067156821e-18,
+        2.1236290292192497e-18
+      ]
+    },
+    {
+      "radius_mm": 3.0,
+      "ray_deg": 0.0,
+      "phase_x_deg": 90.0,
+      "phase_y_deg": 90.0,
+      "delta_p": 0.005,
+      "initial_mm_mrad_mm_c_mev_c": [
+        -0.00440815636298389,
+        -1.0979569894033159,
+        3.8799741955912188e-19,
+        -4.34669408828561e-19,
+        17.37387822965448,
+        1301.9942377588898
+      ],
+      "status": "rftrack_loss",
+      "survived": false,
+      "first_rejected_turn": 1,
+      "completed_turns": 1,
+      "max_entry_displacement_mm_mrad": [
+        0.0014912305209022593,
+        1.0935168409829352,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "radius_mm": 0.0,
+      "ray_deg": 90.0,
+      "phase_x_deg": 0.0,
+      "phase_y_deg": 0.0,
+      "delta_p": 0.005,
+      "initial_mm_mrad_mm_c_mev_c": [
+        -0.004408156362984074,
+        -0.0037245338350149083,
+        3.8799741955912188e-19,
+        -4.34669408828561e-19,
+        17.37387822965448,
+        1301.9942377588898
+      ],
+      "status": "survived",
+      "survived": true,
+      "first_rejected_turn": null,
+      "completed_turns": 10,
+      "max_entry_displacement_mm_mrad": [
+        0.012644488017202174,
+        0.007702000613345342,
+        1.4843640966352312e-17,
+        1.0462862331606358e-17
+      ]
+    },
+    {
+      "radius_mm": 1.0,
+      "ray_deg": 90.0,
+      "phase_x_deg": 0.0,
+      "phase_y_deg": 0.0,
+      "delta_p": 0.005,
+      "initial_mm_mrad_mm_c_mev_c": [
+        -0.0044081563629840125,
+        -0.0037245338350148866,
+        1.0,
+        -0.8536440905668303,
+        17.37387822965448,
+        1301.9942377588898
+      ],
+      "status": "survived",
+      "survived": true,
+      "first_rejected_turn": null,
+      "completed_turns": 10,
+      "max_entry_displacement_mm_mrad": [
+        0.19227988052153766,
+        0.1095491857264647,
+        3.71439819015903,
+        3.648177653808933
+      ]
+    },
+    {
+      "radius_mm": 3.0,
+      "ray_deg": 90.0,
+      "phase_x_deg": 0.0,
+      "phase_y_deg": 0.0,
+      "delta_p": 0.005,
+      "initial_mm_mrad_mm_c_mev_c": [
+        -0.00440815636298389,
+        -0.0037245338350148424,
+        3.0,
+        -2.5609322717004908,
+        17.37387822965448,
+        1301.9942377588898
+      ],
+      "status": "survived",
+      "survived": true,
+      "first_rejected_turn": null,
+      "completed_turns": 10,
+      "max_entry_displacement_mm_mrad": [
+        0.7873174437000205,
+        0.528972876013018,
+        4.290263978417652,
+        4.181283510886327
+      ]
+    },
+    {
+      "radius_mm": 0.0,
+      "ray_deg": 90.0,
+      "phase_x_deg": 0.0,
+      "phase_y_deg": 90.0,
+      "delta_p": 0.005,
+      "initial_mm_mrad_mm_c_mev_c": [
+        -0.004408156362984074,
+        -0.0037245338350149083,
+        3.8799741955912188e-19,
+        -4.34669408828561e-19,
+        17.37387822965448,
+        1301.9942377588898
+      ],
+      "status": "survived",
+      "survived": true,
+      "first_rejected_turn": null,
+      "completed_turns": 10,
+      "max_entry_displacement_mm_mrad": [
+        0.012644488017202174,
+        0.007702000613345342,
+        1.4843640966352312e-17,
+        1.0462862331606358e-17
+      ]
+    },
+    {
+      "radius_mm": 1.0,
+      "ray_deg": 90.0,
+      "phase_x_deg": 0.0,
+      "phase_y_deg": 90.0,
+      "delta_p": 0.005,
+      "initial_mm_mrad_mm_c_mev_c": [
+        -0.0044081563629840125,
+        -0.0037245338350148866,
+        6.162033737692678e-17,
+        -0.11733802165313612,
+        17.37387822965448,
+        1301.9942377588898
+      ],
+      "status": "survived",
+      "survived": true,
+      "first_rejected_turn": null,
+      "completed_turns": 10,
+      "max_entry_displacement_mm_mrad": [
+        0.21285290895340198,
+        0.11285830556350591,
+        3.415270574848017,
+        3.458182662844013
+      ]
+    },
+    {
+      "radius_mm": 3.0,
+      "ray_deg": 90.0,
+      "phase_x_deg": 0.0,
+      "phase_y_deg": 90.0,
+      "delta_p": 0.005,
+      "initial_mm_mrad_mm_c_mev_c": [
+        -0.00440815636298389,
+        -0.0037245338350148424,
+        1.840850172916621e-16,
+        -0.35201406495940835,
+        17.37387822965448,
+        1301.9942377588898
+      ],
+      "status": "survived",
+      "survived": true,
+      "first_rejected_turn": null,
+      "completed_turns": 10,
+      "max_entry_displacement_mm_mrad": [
+        0.30752168712516964,
+        0.17974570622999103,
+        3.2710606863114173,
+        3.1720845654558363
+      ]
+    },
+    {
+      "radius_mm": 0.0,
+      "ray_deg": 90.0,
+      "phase_x_deg": 90.0,
+      "phase_y_deg": 0.0,
+      "delta_p": 0.005,
+      "initial_mm_mrad_mm_c_mev_c": [
+        -0.004408156362984074,
+        -0.0037245338350149083,
+        3.8799741955912188e-19,
+        -4.34669408828561e-19,
+        17.37387822965448,
+        1301.9942377588898
+      ],
+      "status": "survived",
+      "survived": true,
+      "first_rejected_turn": null,
+      "completed_turns": 10,
+      "max_entry_displacement_mm_mrad": [
+        0.012644488017202174,
+        0.007702000613345342,
+        1.4843640966352312e-17,
+        1.0462862331606358e-17
+      ]
+    },
+    {
+      "radius_mm": 1.0,
+      "ray_deg": 90.0,
+      "phase_x_deg": 90.0,
+      "phase_y_deg": 0.0,
+      "delta_p": 0.005,
+      "initial_mm_mrad_mm_c_mev_c": [
+        -0.004408156362984074,
+        -0.003724533835014931,
+        1.0,
+        -0.8536440905668303,
+        17.37387822965448,
+        1301.9942377588898
+      ],
+      "status": "survived",
+      "survived": true,
+      "first_rejected_turn": null,
+      "completed_turns": 10,
+      "max_entry_displacement_mm_mrad": [
+        0.19227988052161438,
+        0.10954918572645074,
+        3.714398190159106,
+        3.6481776538090083
+      ]
+    },
+    {
+      "radius_mm": 3.0,
+      "ray_deg": 90.0,
+      "phase_x_deg": 90.0,
+      "phase_y_deg": 0.0,
+      "delta_p": 0.005,
+      "initial_mm_mrad_mm_c_mev_c": [
+        -0.004408156362984074,
+        -0.003724533835014975,
+        3.0,
+        -2.5609322717004908,
+        17.37387822965448,
+        1301.9942377588898
+      ],
+      "status": "survived",
+      "survived": true,
+      "first_rejected_turn": null,
+      "completed_turns": 10,
+      "max_entry_displacement_mm_mrad": [
+        0.7873174437053135,
+        0.5289728760154239,
+        4.290263978417718,
+        4.1812835108864
+      ]
+    },
+    {
+      "radius_mm": 0.0,
+      "ray_deg": 90.0,
+      "phase_x_deg": 90.0,
+      "phase_y_deg": 90.0,
+      "delta_p": 0.005,
+      "initial_mm_mrad_mm_c_mev_c": [
+        -0.004408156362984074,
+        -0.0037245338350149083,
+        3.8799741955912188e-19,
+        -4.34669408828561e-19,
+        17.37387822965448,
+        1301.9942377588898
+      ],
+      "status": "survived",
+      "survived": true,
+      "first_rejected_turn": null,
+      "completed_turns": 10,
+      "max_entry_displacement_mm_mrad": [
+        0.012644488017202174,
+        0.007702000613345342,
+        1.4843640966352312e-17,
+        1.0462862331606358e-17
+      ]
+    },
+    {
+      "radius_mm": 1.0,
+      "ray_deg": 90.0,
+      "phase_x_deg": 90.0,
+      "phase_y_deg": 90.0,
+      "delta_p": 0.005,
+      "initial_mm_mrad_mm_c_mev_c": [
+        -0.004408156362984074,
+        -0.003724533835014931,
+        6.162033737692678e-17,
+        -0.11733802165313612,
+        17.37387822965448,
+        1301.9942377588898
+      ],
+      "status": "survived",
+      "survived": true,
+      "first_rejected_turn": null,
+      "completed_turns": 10,
+      "max_entry_displacement_mm_mrad": [
+        0.21285290895337375,
+        0.11285830556352712,
+        3.4152705748479995,
+        3.458182662844024
+      ]
+    },
+    {
+      "radius_mm": 3.0,
+      "ray_deg": 90.0,
+      "phase_x_deg": 90.0,
+      "phase_y_deg": 90.0,
+      "delta_p": 0.005,
+      "initial_mm_mrad_mm_c_mev_c": [
+        -0.004408156362984074,
+        -0.003724533835014975,
+        1.840850172916621e-16,
+        -0.35201406495940835,
+        17.37387822965448,
+        1301.9942377588898
+      ],
+      "status": "survived",
+      "survived": true,
+      "first_rejected_turn": null,
+      "completed_turns": 10,
+      "max_entry_displacement_mm_mrad": [
+        0.30752168712514205,
+        0.17974570623000868,
+        3.2710606863115155,
+        3.172084565455966
+      ]
+    }
+  ],
+  "sampled_boundaries": [
+    {
+      "delta_p": 0.0,
+      "ray_deg": 0.0,
+      "phase_x_deg": 0.0,
+      "phase_y_deg": 0.0,
+      "last_contiguous_surviving_radius_mm": 1.0,
+      "first_failing_radius_mm": 3.0,
+      "boundary_beyond_scan": false,
+      "surviving_samples_after_first_failure": 0
+    },
+    {
+      "delta_p": 0.0,
+      "ray_deg": 0.0,
+      "phase_x_deg": 0.0,
+      "phase_y_deg": 90.0,
+      "last_contiguous_surviving_radius_mm": 1.0,
+      "first_failing_radius_mm": 3.0,
+      "boundary_beyond_scan": false,
+      "surviving_samples_after_first_failure": 0
+    },
+    {
+      "delta_p": 0.0,
+      "ray_deg": 0.0,
+      "phase_x_deg": 90.0,
+      "phase_y_deg": 0.0,
+      "last_contiguous_surviving_radius_mm": 1.0,
+      "first_failing_radius_mm": 3.0,
+      "boundary_beyond_scan": false,
+      "surviving_samples_after_first_failure": 0
+    },
+    {
+      "delta_p": 0.0,
+      "ray_deg": 0.0,
+      "phase_x_deg": 90.0,
+      "phase_y_deg": 90.0,
+      "last_contiguous_surviving_radius_mm": 1.0,
+      "first_failing_radius_mm": 3.0,
+      "boundary_beyond_scan": false,
+      "surviving_samples_after_first_failure": 0
+    },
+    {
+      "delta_p": 0.0,
+      "ray_deg": 90.0,
+      "phase_x_deg": 0.0,
+      "phase_y_deg": 0.0,
+      "last_contiguous_surviving_radius_mm": 3.0,
+      "first_failing_radius_mm": null,
+      "boundary_beyond_scan": true,
+      "surviving_samples_after_first_failure": 0
+    },
+    {
+      "delta_p": 0.0,
+      "ray_deg": 90.0,
+      "phase_x_deg": 0.0,
+      "phase_y_deg": 90.0,
+      "last_contiguous_surviving_radius_mm": 3.0,
+      "first_failing_radius_mm": null,
+      "boundary_beyond_scan": true,
+      "surviving_samples_after_first_failure": 0
+    },
+    {
+      "delta_p": 0.0,
+      "ray_deg": 90.0,
+      "phase_x_deg": 90.0,
+      "phase_y_deg": 0.0,
+      "last_contiguous_surviving_radius_mm": 3.0,
+      "first_failing_radius_mm": null,
+      "boundary_beyond_scan": true,
+      "surviving_samples_after_first_failure": 0
+    },
+    {
+      "delta_p": 0.0,
+      "ray_deg": 90.0,
+      "phase_x_deg": 90.0,
+      "phase_y_deg": 90.0,
+      "last_contiguous_surviving_radius_mm": 3.0,
+      "first_failing_radius_mm": null,
+      "boundary_beyond_scan": true,
+      "surviving_samples_after_first_failure": 0
+    },
+    {
+      "delta_p": -0.005,
+      "ray_deg": 0.0,
+      "phase_x_deg": 0.0,
+      "phase_y_deg": 0.0,
+      "last_contiguous_surviving_radius_mm": 1.0,
+      "first_failing_radius_mm": 3.0,
+      "boundary_beyond_scan": false,
+      "surviving_samples_after_first_failure": 0
+    },
+    {
+      "delta_p": -0.005,
+      "ray_deg": 0.0,
+      "phase_x_deg": 0.0,
+      "phase_y_deg": 90.0,
+      "last_contiguous_surviving_radius_mm": 1.0,
+      "first_failing_radius_mm": 3.0,
+      "boundary_beyond_scan": false,
+      "surviving_samples_after_first_failure": 0
+    },
+    {
+      "delta_p": -0.005,
+      "ray_deg": 0.0,
+      "phase_x_deg": 90.0,
+      "phase_y_deg": 0.0,
+      "last_contiguous_surviving_radius_mm": 1.0,
+      "first_failing_radius_mm": 3.0,
+      "boundary_beyond_scan": false,
+      "surviving_samples_after_first_failure": 0
+    },
+    {
+      "delta_p": -0.005,
+      "ray_deg": 0.0,
+      "phase_x_deg": 90.0,
+      "phase_y_deg": 90.0,
+      "last_contiguous_surviving_radius_mm": 1.0,
+      "first_failing_radius_mm": 3.0,
+      "boundary_beyond_scan": false,
+      "surviving_samples_after_first_failure": 0
+    },
+    {
+      "delta_p": -0.005,
+      "ray_deg": 90.0,
+      "phase_x_deg": 0.0,
+      "phase_y_deg": 0.0,
+      "last_contiguous_surviving_radius_mm": 1.0,
+      "first_failing_radius_mm": 3.0,
+      "boundary_beyond_scan": false,
+      "surviving_samples_after_first_failure": 0
+    },
+    {
+      "delta_p": -0.005,
+      "ray_deg": 90.0,
+      "phase_x_deg": 0.0,
+      "phase_y_deg": 90.0,
+      "last_contiguous_surviving_radius_mm": 1.0,
+      "first_failing_radius_mm": 3.0,
+      "boundary_beyond_scan": false,
+      "surviving_samples_after_first_failure": 0
+    },
+    {
+      "delta_p": -0.005,
+      "ray_deg": 90.0,
+      "phase_x_deg": 90.0,
+      "phase_y_deg": 0.0,
+      "last_contiguous_surviving_radius_mm": 1.0,
+      "first_failing_radius_mm": 3.0,
+      "boundary_beyond_scan": false,
+      "surviving_samples_after_first_failure": 0
+    },
+    {
+      "delta_p": -0.005,
+      "ray_deg": 90.0,
+      "phase_x_deg": 90.0,
+      "phase_y_deg": 90.0,
+      "last_contiguous_surviving_radius_mm": 1.0,
+      "first_failing_radius_mm": 3.0,
+      "boundary_beyond_scan": false,
+      "surviving_samples_after_first_failure": 0
+    },
+    {
+      "delta_p": 0.005,
+      "ray_deg": 0.0,
+      "phase_x_deg": 0.0,
+      "phase_y_deg": 0.0,
+      "last_contiguous_surviving_radius_mm": 1.0,
+      "first_failing_radius_mm": 3.0,
+      "boundary_beyond_scan": false,
+      "surviving_samples_after_first_failure": 0
+    },
+    {
+      "delta_p": 0.005,
+      "ray_deg": 0.0,
+      "phase_x_deg": 0.0,
+      "phase_y_deg": 90.0,
+      "last_contiguous_surviving_radius_mm": 1.0,
+      "first_failing_radius_mm": 3.0,
+      "boundary_beyond_scan": false,
+      "surviving_samples_after_first_failure": 0
+    },
+    {
+      "delta_p": 0.005,
+      "ray_deg": 0.0,
+      "phase_x_deg": 90.0,
+      "phase_y_deg": 0.0,
+      "last_contiguous_surviving_radius_mm": 1.0,
+      "first_failing_radius_mm": 3.0,
+      "boundary_beyond_scan": false,
+      "surviving_samples_after_first_failure": 0
+    },
+    {
+      "delta_p": 0.005,
+      "ray_deg": 0.0,
+      "phase_x_deg": 90.0,
+      "phase_y_deg": 90.0,
+      "last_contiguous_surviving_radius_mm": 1.0,
+      "first_failing_radius_mm": 3.0,
+      "boundary_beyond_scan": false,
+      "surviving_samples_after_first_failure": 0
+    },
+    {
+      "delta_p": 0.005,
+      "ray_deg": 90.0,
+      "phase_x_deg": 0.0,
+      "phase_y_deg": 0.0,
+      "last_contiguous_surviving_radius_mm": 3.0,
+      "first_failing_radius_mm": null,
+      "boundary_beyond_scan": true,
+      "surviving_samples_after_first_failure": 0
+    },
+    {
+      "delta_p": 0.005,
+      "ray_deg": 90.0,
+      "phase_x_deg": 0.0,
+      "phase_y_deg": 90.0,
+      "last_contiguous_surviving_radius_mm": 3.0,
+      "first_failing_radius_mm": null,
+      "boundary_beyond_scan": true,
+      "surviving_samples_after_first_failure": 0
+    },
+    {
+      "delta_p": 0.005,
+      "ray_deg": 90.0,
+      "phase_x_deg": 90.0,
+      "phase_y_deg": 0.0,
+      "last_contiguous_surviving_radius_mm": 3.0,
+      "first_failing_radius_mm": null,
+      "boundary_beyond_scan": true,
+      "surviving_samples_after_first_failure": 0
+    },
+    {
+      "delta_p": 0.005,
+      "ray_deg": 90.0,
+      "phase_x_deg": 90.0,
+      "phase_y_deg": 90.0,
+      "last_contiguous_surviving_radius_mm": 3.0,
+      "first_failing_radius_mm": null,
+      "boundary_beyond_scan": true,
+      "surviving_samples_after_first_failure": 0
+    }
+  ],
+  "pipeline_bunch": {
+    "particles": 4,
+    "survivors": 4,
+    "equal_weight_survival_fraction": 1.0,
+    "particles_results": [
+      {
+        "initial_mm_mrad_mm_c_mev_c": [
+          -0.004186413038368536,
+          -0.004465325930805619,
+          0.002237364849055818,
+          -0.0025298694534086957,
+          16.427549400699178,
+          1295.273350015845
+        ],
+        "status": "survived",
+        "survived": true,
+        "first_rejected_turn": null,
+        "completed_turns": 10,
+        "max_entry_displacement_mm_mrad": [
+          0.0028316286014669814,
+          0.0013139962269548364,
+          0.00455613513892535,
+          0.004158933828091395
+        ]
+      },
+      {
+        "initial_mm_mrad_mm_c_mev_c": [
+          -0.007612072635396639,
+          -0.00487536429488955,
+          -0.0022210406088742952,
+          0.0010952694768714424,
+          18.263738532271788,
+          1295.7165406258462
+        ],
+        "status": "survived",
+        "survived": true,
+        "first_rejected_turn": null,
+        "completed_turns": 10,
+        "max_entry_displacement_mm_mrad": [
+          0.002833346689743561,
+          0.0012225643572396751,
+          0.007641100849550275,
+          0.006909083438510887
+        ]
+      },
+      {
+        "initial_mm_mrad_mm_c_mev_c": [
+          -0.007185124099379675,
+          -0.004922550917066726,
+          -0.003112277524493092,
+          0.0029014798935725634,
+          17.021017734933963,
+          1295.4053861163281
+        ],
+        "status": "survived",
+        "survived": true,
+        "first_rejected_turn": null,
+        "completed_turns": 10,
+        "max_entry_displacement_mm_mrad": [
+          0.0012857372154935253,
+          0.000631728671682188,
+          0.003162948412068232,
+          0.002901479893572564
+        ]
+      },
+      {
+        "initial_mm_mrad_mm_c_mev_c": [
+          -0.004614247813921598,
+          -0.002972751730236922,
+          0.003101061671934849,
+          -0.001946153498487342,
+          17.783207250683887,
+          1295.6170601296271
+        ],
+        "status": "survived",
+        "survived": true,
+        "first_rejected_turn": null,
+        "completed_turns": 10,
+        "max_entry_displacement_mm_mrad": [
+          0.003704252342706255,
+          0.001467396690143655,
+          0.007535279328179385,
+          0.0068274236773578
+        ]
+      }
+    ],
+    "linac_bt_charge_transmission": 1.0,
+    "model_end_to_end_survival": 1.0,
+    "entrance_source": "Interfaces/ATF2/linac_bt_dr_entrance_bunch_synthetic_example.json"
+  },
+  "elapsed_seconds": 7.977430333034135
+}

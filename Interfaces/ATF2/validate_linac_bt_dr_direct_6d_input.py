@@ -17,7 +17,7 @@ from Interfaces.ATF2.ATF2_LinacBTDR_RFTrack import (
     ATF2LinacBTDRRFTrack,
     load_entrance_bunch_json,
 )
-from Interfaces.ATF2.benchmark_linac_bt_dr_capture_proxy import (
+from Interfaces.ATF2.linac_bt_dr_model_config import (
     MODEL_ENERGY_MATCHED_CAVITY_VOLTAGE_MV,
 )
 

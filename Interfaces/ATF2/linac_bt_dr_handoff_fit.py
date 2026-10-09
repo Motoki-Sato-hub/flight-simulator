@@ -1,4 +1,4 @@
-"""Fit a measured BT-IPZT to DR-RING0 transverse handoff for the twin.
+"""Fit a measured BT-IPZT to a declared DR-entry transverse handoff for the twin.
 
 The current SAD/RF-Track handoff is a design-optics baseline.  A digital twin
 needs to replace it with a map fitted from a dither data set: each row contains
@@ -6,7 +6,7 @@ the BT endpoint coordinates inferred from upstream diagnostics and the DR
 injection coordinates measured after the injection pulse.  This module fits
 the affine 4D map without opening a control-system connection.
 
-It deliberately does not infer longitudinal timing, RF phase, or physical
+    It deliberately does not infer longitudinal timing, RF phase, or physical
 apertures.  Those require independent data and remain separate calibration
 inputs.
 """
@@ -46,13 +46,73 @@ class HandoffFitResult:
         }
 
 
+@dataclass(frozen=True)
+class HandoffEvaluation:
+    """Out-of-sample transverse residuals for an exported handoff map.
+
+    Coordinates retain the handoff convention ``[mm, mrad, mm, mrad]``.
+    The aggregate norms are therefore diagnostics, not a unitless merit;
+    downstream users should set their own BPM/monitor uncertainty weights.
+    """
+
+    samples: int
+    rms_residual_mm_mrad: float
+    max_abs_residual_mm_or_mrad: float
+    mean_residual_mm_mrad: np.ndarray
+    rms_residual_by_coordinate_mm_mrad: np.ndarray
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "samples": self.samples,
+            "rms_residual_mm_mrad": self.rms_residual_mm_mrad,
+            "max_abs_residual_mm_or_mrad": self.max_abs_residual_mm_or_mrad,
+            "mean_residual_mm_mrad": self.mean_residual_mm_mrad.tolist(),
+            "rms_residual_by_coordinate_mm_mrad": (
+                self.rms_residual_by_coordinate_mm_mrad.tolist()
+            ),
+            "coordinate_order": "x_mm,xp_mrad,y_mm,yp_mrad",
+        }
+
+
+def evaluate_transverse_handoff(
+    handoff: TransverseHandoff,
+    source_coordinates_mm_mrad: Sequence[Sequence[float]],
+    observed_target_coordinates_mm_mrad: Sequence[Sequence[float]],
+) -> HandoffEvaluation:
+    """Score a fitted map on independent BT-endpoint/DR-injection samples.
+
+    This intentionally does no refit.  Supply held-out dither shots (or a
+    later machine period) to measure the transverse part of twin-model drift.
+    It cannot diagnose longitudinal timing, RF capture or an aperture model.
+    """
+    source = np.asarray(source_coordinates_mm_mrad, dtype=float)
+    target = np.asarray(observed_target_coordinates_mm_mrad, dtype=float)
+    if source.ndim != 2 or source.shape[1:] != (4,) or source.shape[0] < 1:
+        raise ValueError("evaluation source coordinates must have shape (samples>=1, 4)")
+    if target.shape != source.shape:
+        raise ValueError("evaluation target coordinates must have the same shape as source")
+    if not np.all(np.isfinite(source)) or not np.all(np.isfinite(target)):
+        raise ValueError("evaluation source and target coordinates must be finite")
+    predicted = source @ np.asarray(handoff.matrix, dtype=float).T
+    predicted += np.asarray(handoff.offset_mm_mrad, dtype=float)
+    residual = target - predicted
+    return HandoffEvaluation(
+        samples=int(source.shape[0]),
+        rms_residual_mm_mrad=float(np.sqrt(np.mean(np.square(residual))),),
+        max_abs_residual_mm_or_mrad=float(np.max(np.abs(residual))),
+        mean_residual_mm_mrad=np.mean(residual, axis=0),
+        rms_residual_by_coordinate_mm_mrad=np.sqrt(np.mean(np.square(residual), axis=0)),
+    )
+
+
 def fit_transverse_handoff(
     source_coordinates_mm_mrad: Sequence[Sequence[float]],
     observed_target_coordinates_mm_mrad: Sequence[Sequence[float]],
     *,
     baseline_dispersion_handoff: TransverseHandoff | None = None,
     rcond: float | None = None,
-    provenance: str = "least-squares fitted BT IPZT-to-DR RING0 transverse handoff",
+    target_location: str = "KII.1",
+    provenance: str | None = None,
 ) -> HandoffFitResult:
     """Fit ``target = matrix @ source + offset`` from a dither data set.
 
@@ -61,9 +121,12 @@ def fit_transverse_handoff(
     a stated first-order dispersion treatment, pass it as
     ``baseline_dispersion_handoff`` to retain that *separately calibrated*
     energy mapping; transverse dither data alone cannot identify dispersion.
+    ``target_location`` must name the same RF-Track entry boundary used later
+    by the tracking pipeline (normally ``KII.1``).
     """
     source = np.asarray(source_coordinates_mm_mrad, dtype=float)
     target = np.asarray(observed_target_coordinates_mm_mrad, dtype=float)
+    target_location = str(target_location).upper()
     if source.ndim != 2 or source.shape[1:] != (4,):
         raise ValueError("source coordinates must have shape (samples, 4)")
     if target.shape != source.shape:
@@ -88,6 +151,11 @@ def fit_transverse_handoff(
     condition = float(singular_values[0] / singular_values[-1])
     kwargs: dict[str, object] = {}
     if baseline_dispersion_handoff is not None:
+        if baseline_dispersion_handoff.target_location.upper() != target_location:
+            raise ValueError(
+                "baseline dispersion handoff target_location does not match the fitted target: "
+                f"{baseline_dispersion_handoff.target_location!r} != {target_location!r}"
+            )
         if (
             baseline_dispersion_handoff.source_dispersion_mm_mrad is None
             or baseline_dispersion_handoff.target_dispersion_mm_mrad is None
@@ -99,11 +167,17 @@ def fit_transverse_handoff(
             "target_dispersion_mm_mrad": baseline_dispersion_handoff.target_dispersion_mm_mrad,
             "reference_momentum_mev_c": baseline_dispersion_handoff.reference_momentum_mev_c,
         }
-        provenance += "; retained first-order dispersion from supplied baseline"
+    resolved_provenance = (
+        provenance
+        or f"least-squares fitted BT IPZT-to-DR {target_location} transverse handoff"
+    )
+    if baseline_dispersion_handoff is not None:
+        resolved_provenance += "; retained first-order dispersion from supplied baseline"
     handoff = TransverseHandoff(
         matrix=matrix,
         offset_mm_mrad=offset,
-        provenance=provenance,
+        provenance=resolved_provenance,
+        target_location=target_location,
         **kwargs,
     )
     return HandoffFitResult(
@@ -116,7 +190,10 @@ def fit_transverse_handoff(
     )
 
 
-__all__ = ["HandoffFitResult", "fit_transverse_handoff"]
+__all__ = [
+    "HandoffEvaluation", "HandoffFitResult", "evaluate_transverse_handoff",
+    "fit_transverse_handoff",
+]
 
 
 def main() -> None:
@@ -124,6 +201,8 @@ def main() -> None:
 
     The input schema is ``{"source_coordinates_mm_mrad": [[...], ...],
     "observed_target_coordinates_mm_mrad": [[...], ...],
+    "validation_source_coordinates_mm_mrad": [[...], ...]?,
+    "validation_observed_target_coordinates_mm_mrad": [[...], ...]?,
     "baseline_dispersion_handoff": {...}?}``.  The optional baseline is a
     ``TransverseHandoff.as_dict()`` payload used only to retain separately
     calibrated first-order dispersion.
@@ -136,7 +215,9 @@ def main() -> None:
         raise ValueError("handoff-fit input must be a JSON object")
     allowed = {
         "source_coordinates_mm_mrad", "observed_target_coordinates_mm_mrad",
-        "baseline_dispersion_handoff",
+        "validation_source_coordinates_mm_mrad",
+        "validation_observed_target_coordinates_mm_mrad",
+        "baseline_dispersion_handoff", "target_location",
     }
     unknown = set(payload) - allowed
     required = {"source_coordinates_mm_mrad", "observed_target_coordinates_mm_mrad"}
@@ -149,16 +230,30 @@ def main() -> None:
     baseline = (
         None if baseline_payload is None else TransverseHandoff.from_dict(baseline_payload)
     )
+    target_location = str(payload.get("target_location", "KII.1"))
     result = fit_transverse_handoff(
         payload["source_coordinates_mm_mrad"],
         payload["observed_target_coordinates_mm_mrad"],
         baseline_dispersion_handoff=baseline,
+        target_location=target_location,
         provenance=(
-            "least-squares fitted BT IPZT-to-DR RING0 transverse handoff "
+            f"least-squares fitted BT IPZT-to-DR {target_location} transverse handoff "
             f"from {Path(args.input_json).name}"
         ),
     )
-    print(json.dumps(result.as_dict(), indent=2))
+    validation_source = payload.get("validation_source_coordinates_mm_mrad")
+    validation_target = payload.get("validation_observed_target_coordinates_mm_mrad")
+    if (validation_source is None) != (validation_target is None):
+        raise ValueError(
+            "validation_source_coordinates_mm_mrad and "
+            "validation_observed_target_coordinates_mm_mrad must be supplied together"
+        )
+    output = result.as_dict()
+    if validation_source is not None:
+        output["held_out_validation"] = evaluate_transverse_handoff(
+            result.handoff, validation_source, validation_target
+        ).as_dict()
+    print(json.dumps(output, indent=2))
 
 
 if __name__ == "__main__":

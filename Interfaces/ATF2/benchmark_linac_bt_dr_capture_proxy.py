@@ -8,7 +8,7 @@ simulation study choice; they are not a substitute for a measured ATF bunch.
 
 The report deliberately separates cheap endpoint diagnostics from a short
 multi-turn survival check.  It does not claim final physical transmission:
-that needs a calibrated IPZT-to-ring injection map and aperture/loss data.
+that needs a calibrated IPZT-to-KII.1 injection map and aperture/loss data.
 """
 
 from __future__ import annotations
@@ -27,14 +27,12 @@ from Interfaces.ATF2.DR_ATF2.ATF_DR_RFTrack_lattice import (
     HISTORICAL_ATF_DR_APERTURE_SOURCE,
     get_historical_extraction_kicker_apertures,
 )
+from Interfaces.ATF2.linac_bt_dr_model_config import (
+    MODEL_ENERGY_MATCHED_CAVITY_VOLTAGE_MV,
+)
 from Interfaces.ATF2.simulate_linac_bt_dr_handoff import TransverseHandoff
 
 
-# Offline RF voltage which brings the current SAD-derived reference exit to
-# the deterministic RF-Track DR synchronous momentum.  It is model tuning,
-# not an operational ATF voltage recommendation; RF phase and BT time of
-# flight still require calibration before any real-machine interpretation.
-MODEL_ENERGY_MATCHED_CAVITY_VOLTAGE_MV = 75.85997836493
 SAD_IPP1L_BETA_M = 1.93
 
 
@@ -65,6 +63,16 @@ def _load_handoff(path: str | None) -> TransverseHandoff | None:
     if not isinstance(handoff_payload, dict):
         raise ValueError("handoff JSON 'handoff' field must be an object")
     return TransverseHandoff.from_dict(handoff_payload)
+
+
+def _load_first_turn_kicks(path: str | None) -> dict[str, tuple[float, float]] | None:
+    """Load explicit physical DR pulse kicks without inventing a calibration."""
+    if path is None:
+        return None
+    payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("first-turn kicker JSON must be an object keyed by KII/KIX name")
+    return {name: tuple(values) for name, values in payload.items()}
 
 
 def main() -> None:
@@ -132,6 +140,14 @@ def main() -> None:
             "result JSON.  It replaces the design handoff without any controls access."
         ),
     )
+    parser.add_argument(
+        "--dr-first-turn-kicks-json",
+        help=(
+            "JSON physical pulse table, e.g. {'KII': [theta_x_rad, theta_y_rad]}. "
+            "It is active only for the first DR turn; values must come from a "
+            "separate kicker calibration."
+        ),
+    )
     args = parser.parse_args()
     if args.particles < 2 and args.entrance_bunch_json is None:
         raise ValueError("particles must be at least two for projected optics")
@@ -152,12 +168,14 @@ def main() -> None:
         if args.historical_kix_screen else {}
     )
     fitted_handoff = _load_handoff(args.handoff_json)
+    first_turn_kicks = _load_first_turn_kicks(args.dr_first_turn_kicks_json)
     machine = ATF2LinacBTDRRFTrack(
         cavity_voltage_mv=args.cavity_voltage_mv,
         dr_rf_mode="equilibrium",
         handoff_mode="sad_optics_matched",
         handoff=fitted_handoff,
         dr_apertures_mm=historical_kix_apertures,
+        dr_first_turn_kicks_rad=first_turn_kicks,
     )
     construction_seconds = time.perf_counter() - started
     direct_entrance = (
@@ -233,11 +251,14 @@ def main() -> None:
             "cavity_voltage_mv": args.cavity_voltage_mv,
             "linac_bt_reference_exit_momentum_mev_c": machine.reference_exit_momentum_mev_c,
             "dr_synchronous_momentum_mev_c": float(machine.dr_synchronous_orbit[5]),
+            "dr_entry": machine.dr_entry,
             "reference_energy_difference_mev_c": (
                 machine.reference_exit_momentum_mev_c - float(machine.dr_synchronous_orbit[5])
             ),
             "handoff_provenance": machine.handoff.provenance,
             "handoff_json": args.handoff_json,
+            "dr_first_turn_kicks_json": args.dr_first_turn_kicks_json,
+            "dr_first_turn_kicks_rad": machine.dr_first_turn_kicks_rad,
             "linac_bt_energy_profile_magnet_adjustments": (
                 machine.linac_bt_metadata.get("energy_profile_magnet_adjustments")
             ),
@@ -312,7 +333,7 @@ def main() -> None:
         "interpretation": {
             "fast_filter": "Rank corrector/optics candidates by energy error and endpoint mismatch before ring tracking.",
             "validation": "Use short tracking to reject prompt loss, then reserve the optional direct long-turn stage for selected candidates.",
-            "limit": "Neither quantity is final physical transmission until the IPZT-to-RING0 map, injection pulse, and complete aperture/loss model are calibrated.",
+            "limit": "Neither quantity is final physical transmission until the IPZT-to-KII.1 map, injection pulse, and complete aperture/loss model are calibrated.",
         },
     }, indent=2))
 

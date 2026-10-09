@@ -16,13 +16,13 @@ import json
 import numpy as np
 
 from Interfaces.ATF2.ATF2_LinacBTDR_RFTrack import ATF2LinacBTDRRFTrack
+from Interfaces.ATF2.linac_bt_dr_model_config import (
+    MODEL_ENERGY_MATCHED_CAVITY_VOLTAGE_MV,
+)
 
 
 ACTUATORS = ("ZH1L", "ZH2L", "ZV1L", "ZV2L")
 SYNTHETIC_ERROR = {"ZH5L": 3.0e-4, "ZV5L": -2.0e-4}
-MODEL_MATCHED_CAVITY_VOLTAGE_MV = 75.85997836492652
-
-
 def injection_orbit(machine: ATF2LinacBTDRRFTrack) -> np.ndarray:
     result = machine.track(machine.make_reference_bunch(), dr_turns=0)
     return np.array((
@@ -43,7 +43,7 @@ def main() -> None:
         raise ValueError("turns must be positive")
 
     machine = ATF2LinacBTDRRFTrack(
-        cavity_voltage_mv=MODEL_MATCHED_CAVITY_VOLTAGE_MV,
+        cavity_voltage_mv=MODEL_ENERGY_MATCHED_CAVITY_VOLTAGE_MV,
         handoff_mode="sad_optics_matched",
         dr_rf_mode="equilibrium",
     )
@@ -74,7 +74,7 @@ def main() -> None:
     print(json.dumps({
         "simulation_only": True,
         "purpose": "synthetic response-matrix correction baseline for RL comparison",
-        "cavity_voltage_mv": MODEL_MATCHED_CAVITY_VOLTAGE_MV,
+        "cavity_voltage_mv": MODEL_ENERGY_MATCHED_CAVITY_VOLTAGE_MV,
         "synthetic_error_rftrack_strength": SYNTHETIC_ERROR,
         "actuators": list(names),
         "response_step_rftrack_strength": args.response_step,
@@ -89,7 +89,7 @@ def main() -> None:
         "ring_survival_after_turns": tracked.dr_after_turns.survival_fraction_from_input,
         "limitations": [
             "Synthetic errors and uncalibrated RFTrack corrector strengths are used.",
-            "No surveyed IPZT-to-RING0 coordinate/pulsed-kicker calibration is loaded.",
+            "No surveyed IPZT-to-KII.1 coordinate/pulsed-kicker calibration is loaded.",
             "No complete measured aperture/loss-monitor table is loaded.",
         ],
     }, indent=2))

@@ -2,7 +2,7 @@
 
 The sweep applies a synthetic offset to the *BT-to-DR handoff*, not to a real
 corrector or control system.  It therefore probes the sensitivity that remains
-while the IPZT-to-RING0 survey/kicker map is uncalibrated.  The default uses
+while the IPZT-to-KII.1 survey/kicker map is uncalibrated.  The default uses
 only the historically located KIX.1/.2 5-mm half-aperture screen;
 ``--aperture-screen none`` provides the corresponding dynamic-capture
 comparison.  Neither is a complete ATF aperture model or a final-transmission
@@ -22,7 +22,7 @@ from Interfaces.ATF2.DR_ATF2.ATF_DR_RFTrack_lattice import (
     HISTORICAL_ATF_DR_APERTURE_SOURCE,
     get_historical_extraction_kicker_apertures,
 )
-from Interfaces.ATF2.benchmark_linac_bt_dr_capture_proxy import (
+from Interfaces.ATF2.linac_bt_dr_model_config import (
     MODEL_ENERGY_MATCHED_CAVITY_VOLTAGE_MV,
 )
 
@@ -115,7 +115,7 @@ def main() -> None:
         "simulation_only": True,
         "purpose": "endpoint-orbit versus prompt-loss sensitivity; no real controls",
         "synthetic_error": (
-            "horizontal offset added to the design-optics IPZT-to-RING0 handoff; "
+            "horizontal offset added to the design-optics IPZT-to-KII.1 handoff; "
             "it represents uncalibrated injection-map/kicker error, not a corrector setting"
         ),
         "cavity_voltage_mv": args.cavity_voltage_mv,

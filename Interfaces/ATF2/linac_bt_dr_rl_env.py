@@ -16,9 +16,11 @@ from typing import Mapping, Sequence
 import numpy as np
 
 from Interfaces.ATF2.ATF2_LinacBTDR_RFTrack import ATF2LinacBTDRRFTrack
+from Interfaces.ATF2.linac_bt_dr_model_config import (
+    MODEL_ENERGY_MATCHED_CAVITY_VOLTAGE_MV,
+)
 
 
-MODEL_MATCHED_CAVITY_VOLTAGE_MV = 75.85997836492652
 DEFAULT_ACTUATORS = ("ZH1L", "ZH2L", "ZV1L", "ZV2L")
 DEFAULT_SYNTHETIC_ERROR = {"ZH5L": 3.0e-4, "ZV5L": -2.0e-4}
 
@@ -72,7 +74,7 @@ class LinacBTDRInjectionEnv:
             raise ValueError("max_abs_delta_strength must be positive and finite")
 
         self.machine = ATF2LinacBTDRRFTrack(
-            cavity_voltage_mv=MODEL_MATCHED_CAVITY_VOLTAGE_MV,
+            cavity_voltage_mv=MODEL_ENERGY_MATCHED_CAVITY_VOLTAGE_MV,
             handoff_mode="sad_optics_matched",
             dr_rf_mode="equilibrium",
         )

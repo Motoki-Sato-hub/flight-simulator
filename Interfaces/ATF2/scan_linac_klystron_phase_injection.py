@@ -7,14 +7,14 @@ L8 -> CA15L/CA16L.  Phase offsets are relative to each structure's SAD phase
 
 The default common powered-structure voltage was matched once by direct
 RF-Track reference tracking to the DR synchronous momentum for an 80-MeV
-entrance.  The resulting Linac+BT magnet fields and the IPZT-to-RING0 handoff
+entrance.  The resulting Linac+BT magnet fields and the IPZT-to-KII.1 handoff
 are then held fixed while the eight RF phases are scanned.  This is
 intentional: re-matching the optics handoff or re-tuning magnets for every
 trial would mask the effect of RF phase errors.
 
 Everything is simulation-only.  It is a calibration-design exercise, not an
 ATF RF setpoint recommendation: the klystron-to-structure mapping, amplitude
-calibration, timing, and IPZT-to-RING0 injection map remain to be measured.
+calibration, timing, and IPZT-to-KII.1 injection map remain to be measured.
 """
 
 from __future__ import annotations
@@ -35,9 +35,10 @@ from Interfaces.ATF2.ATF2_LinacBTDR_RFTrack import (
 
 INPUT_MOMENTUM_MEV_C = 80.0
 # Direct RF-Track model match at 80 MeV/c with all klystron offsets zero.
-# It gives a reference exit mismatch of 1.35e-5 MeV/c in the current model.
+# It gives a reference exit mismatch below 1e-6 MeV/c at the KII.1 entry in
+# the current model.
 # This is not an operational amplitude setpoint.
-MODEL_MATCHED_80MEV_CAVITY_VOLTAGE_MV = 76.007891
+MODEL_MATCHED_80MEV_CAVITY_VOLTAGE_MV = 76.00741965
 STUDY_TWISS = EntranceBunchTwiss(1.0, 1.0, 1.93, 1.93)
 SYNTHETIC_STARTING_PHASE_ERROR_DEG = {
     "L1": 2.0, "L2": -1.5, "L3": 1.0, "L4": -2.0,
